@@ -1,0 +1,128 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1.0in]{geometry}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tcolorbox}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+% --- Professional Typography ---
+\usepackage{inter}
+\usepackage{inconsolata}
+\renewcommand{\familydefault}{\sfdefault}
+
+% --- Custom Colors ---
+\definecolor{tindblue}{HTML}{0F172A}      % Slate 900 (Main)
+\definecolor{tindaccent}{HTML}{2563EB}    % Blue 600 (Accent)
+\definecolor{tindbg}{HTML}{F8FAFC}        % Slate 50 (Code BG)
+\definecolor{tindborder}{HTML}{E2E8F0}    % Slate 200 (Borders)
+\definecolor{alertbg}{HTML}{FEF2F2}       % Red 50 (Warning BG)
+\definecolor{alertborder}{HTML}{FCA5A5}   % Red 300 (Warning Border)
+
+% --- Page Style Setup ---
+\hypersetup{
+  colorlinks=true,
+  linkcolor=tindaccent,
+  urlcolor=tindaccent
+}
+
+\titleformat{\section}
+  {\color{tindblue}\normalfont\Large\bfseries}
+  {\thesection}{1em}{}
+\titleformat{\subsection}
+  {\color{tindaccent}\normalfont\large\bfseries}
+  {\thesubsection}{1em}{}
+
+% --- Code Block Formatting ---
+\lstset{
+  backgroundcolor=\color{tindbg},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{tindborder},
+  keywordstyle=\color{tindaccent}\bfseries,
+  showstringspaces=false
+}
+
+% --- Custom Boxes ---
+\newtcolorbox{importantnote}{
+  colback=alertbg,
+  colframe=alertborder,
+  boxrule=1pt,
+  arc=4pt,
+  title={\color{red!80!black}\bfseries IMPORTANT SECURITY NOTE},
+  fonttitle=\small\bfseries
+}
+
+% --- Document Metadata ---
+\title{\color{tindblue}\Huge\bfseries Tind SMTP Setup Guide \\ \Large\textmd{Dedicated Support Gmail \& Credentials Configuration}}
+\author{\textbf{Tind Development Team}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document outlines the step-by-step setup procedure to configure a dedicated transaction/support email for the Tind backend system. It details Google Account registration, security settings (App Passwords), and environment variable configuration to enable transaction-triggered notifications.
+\end{abstract}
+
+\hrule
+\vspace{1.5em}
+
+\section{Introduction}
+To send general application emails (such as order updates, payouts, and verification alerts) dynamically from the Tind backend, the server leverages standard SMTP. A dedicated Google Gmail account acts as our SMTP provider. 
+
+\begin{importantnote}
+Google blocks external sign-in attempts using standard passwords. To authorize the server, you \textbf{must} enable 2-Step Verification and generate a 16-character \textbf{App Password} as described in Section \ref{sec:app-password}.
+\end{importantnote}
+
+\section{Step 1: Create a Dedicated Support Gmail Account}
+For customer branding, register a new support address rather than utilizing personal mailboxes.
+\begin{enumerate}
+    \item Open the \href{https://accounts.google.com/signup}{Google Account Creation Portal}.
+    \item Select the option \textbf{``For my personal use''} (recommended and cost-free).
+    \item Choose a professional username, for example:
+    \begin{itemize}
+        \item \texttt{support.tind@gmail.com}
+        \item \texttt{tind.notifications@gmail.com}
+        \item \texttt{tind.app.alerts@gmail.com}
+    \end{itemize}
+    \item Complete the standard setup flow, linking a recovery number and email.
+\end{enumerate}
+
+\section{Step 2: Enable 2-Step Verification \& Generate App Password}
+\label{sec:app-password}
+To grant the backend server access to send emails on your behalf:
+\begin{enumerate}
+    \item Log into your newly created account at the \href{https://myaccount.google.com/}{Google Account Hub}.
+    \item Navigate to the \textbf{Security} tab from the left sidebar.
+    \item Locate the section titled \textbf{``How you sign in to Google''}.
+    \item Click on \textbf{2-Step Verification} and follow the prompts to activate it.
+    \item Once enabled, return to the \textbf{2-Step Verification} settings page, scroll to the bottom, and select \textbf{App passwords}.
+    \item Input a descriptor (e.g., \texttt{Tind Backend Server}) and press \textbf{Create}.
+    \item Copy the generated \textbf{16-character password} (e.g., \texttt{abcd efgh ijkl mnop}). Save it safely, as it will not be displayed again.
+\end{enumerate}
+
+\section{Step 3: Update Backend Configuration}
+Open the environment file at \texttt{tind-backend/backend/.env} and insert the credentials (ensuring you remove any spaces from the 16-character App Password):
+
+\begin{lstlisting}[language=bash]
+# --- SMTP Email Integration ---
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=tind.notifications@gmail.com
+SMTP_PASS=abcdefghijklmnop
+SMTP_FROM="Tind Support" <tind.notifications@gmail.com>
+\end{lstlisting}
+
+\section{Step 4: Verification and Maintenance}
+When the server is booted using \texttt{npm run dev} or \texttt{node server.js}:
+\begin{itemize}
+    \item In \textbf{Development mode} (\texttt{NODE\_ENV=development}), configuring these variables triggers live outbound emails. In their absence, email contents are outputted directly to the server logs.
+    \item In \textbf{Production mode}, ensure port \texttt{587} is open on your host firewall to establish secure TLS SMTP handshakes.
+\end{itemize}
+
+\end{document}

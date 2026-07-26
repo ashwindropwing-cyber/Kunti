@@ -1,59 +1,60 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const CustomerAddress = new FirebaseModel("customer_addresses", {
-  user_id: {
-    type: "string",
-    required: true
+const CustomerAddress = sequelize.define(
+  "CustomerAddress",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    address_line1: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    address_line2: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    landmark: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    city: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "Kolkata",
+    },
+    pincode: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    latitude: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
+    longitude: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
+    address_type: {
+      type: DataTypes.STRING,
+      defaultValue: "HOME",
+    },
+    is_default: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
   },
-  label: {
-    type: "string",
-    required: true
-  },
-  house_no: {
-    type: "string",
-    required: true
-  },
-  area: {
-    type: "string",
-    required: true
-  },
-  landmark: {
-    type: "string",
-    required: false
-  },
-  city: {
-    type: "string",
-    required: true
-  },
-  state: {
-    type: "string",
-    required: true
-  },
-  pincode: {
-    type: "string",
-    required: true
-  },
-  latitude: {
-    type: "number",
-    required: true
-  },
-  longitude: {
-    type: "number",
-    required: true
-  },
-  name: {
-    type: "string",
-    required: true
-  },
-  phone_number: {
-    type: "string",
-    required: true
-  },
-  is_default: {
-    type: "boolean",
-    required: false,
-    default: false
+  {
+    tableName: "customer_addresses",
+    timestamps: true,
   }
-});
+);
 
 module.exports = CustomerAddress;

@@ -1,40 +1,43 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const Review = new FirebaseModel("reviews", {
-  user_id: {
-    type: "string",
-    required: true
+const Review = sequelize.define(
+  "Review",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    product_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    rider_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    rating: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+    comment: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    review_type: {
+      type: DataTypes.STRING,
+      defaultValue: "PRODUCT", // 'PRODUCT' or 'RIDER'
+    },
   },
-  master_order_id: {
-    type: "string",
-    required: true
-  },
-  review_type: {
-    type: "string",
-    required: true,
-    default: "SELLER"
-  },
-  seller_id: {
-    type: "string",
-    required: false
-  },
-  rider_id: {
-    type: "string",
-    required: false
-  },
-  product_id: {
-    type: "string",
-    required: false
-  },
-  rating: {
-    type: "number",
-    required: true,
-    default: 0
-  },
-  comment: {
-    type: "string",
-    required: false
+  {
+    tableName: "reviews",
+    timestamps: true,
   }
-});
+);
 
 module.exports = Review;

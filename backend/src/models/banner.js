@@ -1,28 +1,39 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const Banner = new FirebaseModel("banners", {
-  image_url: {
-    type: "string",
-    required: true
+const Banner = sequelize.define(
+  "Banner",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    title: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    image_url: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    redirect_url: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    display_order: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+    },
   },
-  title: {
-    type: "string",
-    required: false
-  },
-  redirect_url: {
-    type: "string",
-    required: false
-  },
-  display_order: {
-    type: "number",
-    required: false,
-    default: 0
-  },
-  is_active: {
-    type: "boolean",
-    required: false,
-    default: true
+  {
+    tableName: "banners",
+    timestamps: true,
   }
-});
+);
 
 module.exports = Banner;

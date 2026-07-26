@@ -7,7 +7,6 @@ const {
 } = require("../middlewares/authMiddleware");
 
 const upload = require("../utils/upload");
-const documentUpload = require("../utils/documentUpload");
 const { uploadLimiter } = require("../middlewares/rateLimiter");
 
 /**
@@ -16,7 +15,7 @@ const { uploadLimiter } = require("../middlewares/rateLimiter");
 router.post("/register", uploadLimiter, upload.single("profile_picture"), riderController.register);
 
 /**
- * RIDER ONLINE / OFFLINE
+ * RIDER ONLINE / OFFLINE & DASHBOARD
  */
 router.get(
   "/dashboard",
@@ -32,28 +31,11 @@ router.patch(
   riderController.updateAvailability
 );
 
-// Map tracking and radius features removed
-
 router.patch(
   "/fcm-token",
   verifyToken,
   allowRoles("RIDER"),
   riderController.updateFcmToken
-);
-router.post(
-  "/documents/upload",
-  verifyToken,
-  allowRoles("RIDER"),
-  uploadLimiter,
-  documentUpload.array("document", 3),
-  riderController.uploadDocument
-);
-
-router.get(
-  "/documents/my",
-  verifyToken,
-  allowRoles("RIDER"),
-  riderController.getMyDocuments
 );
 
 router.get(

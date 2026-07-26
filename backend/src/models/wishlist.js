@@ -1,14 +1,27 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const Wishlist = new FirebaseModel("wishlists", {
-  user_id: {
-    type: "string",
-    required: true
+const Wishlist = sequelize.define(
+  "Wishlist",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    product_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
   },
-  product_id: {
-    type: "string",
-    required: true
+  {
+    tableName: "wishlists",
+    timestamps: true,
   }
-});
+);
 
 module.exports = Wishlist;

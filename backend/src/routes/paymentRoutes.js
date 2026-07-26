@@ -8,22 +8,4 @@ router.post("/create", verifyToken, allowRoles("CUSTOMER"), paymentController.cr
 router.post("/verify", verifyToken, allowRoles("CUSTOMER"), paymentController.verifyPayment);
 router.post("/retry", verifyToken, allowRoles("CUSTOMER"), paymentController.retryPayment);
 
-// REFUND ROUTES (USER)
-router.post("/refund/request", verifyToken, allowRoles("CUSTOMER"), paymentController.requestRefund);
-
-// REFUND ROUTES (ADMIN)
-router.get(
-  "/refund/requests",
-  verifyToken,
-  allowRoles("ADMIN"),
-  paymentController.getAllRefundRequests
-);
-
-router.post(
-  "/refund/process",
-  verifyToken,
-  allowRoles("ADMIN"),
-  paymentController.processRefundRequest
-);
-
 module.exports = router;

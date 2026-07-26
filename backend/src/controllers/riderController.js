@@ -1,13 +1,11 @@
 const Rider = require("../models/rider");
 const MasterOrder = require("../models/masterOrder");
 const User = require("../models/user");
-const Wallet = require("../models/wallet");
 const jwt = require("jsonwebtoken");
 const Review = require("../models/review");
 const PlatformSettings = require("../models/platformSettings");
 
-
-const { db, isFirebaseReady } = require("../config/firebase");
+const { admin } = require("../config/firebase");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
 const { chunkedFindAll } = require("../utils/dbHelper");
@@ -35,8 +33,9 @@ exports.getDashboard = asyncHandler(async (req, res) => {
   });
 
   // Compute all stats in-memory
+  // Status flow: PLACED → ACCEPTED → PREPARING → ASSIGNED → OUT_FOR_DELIVERY → DELIVERED
   const completedOrders = allRiderOrders.filter(o => o.status === "DELIVERED").length;
-  const assignedOrders = allRiderOrders.filter(o => o.status === "ASSIGNED").length;
+  const assignedOrders = allRiderOrders.filter(o => o.status === "ASSIGNED").length;         // food ready, rider picking up
   const outForDeliveryOrders = allRiderOrders.filter(o => o.status === "OUT_FOR_DELIVERY").length;
   const codPendingAssigned = allRiderOrders.filter(o =>
     o.status === "ASSIGNED" && o.payment_method === "COD" && !o.cod_collected
@@ -45,28 +44,26 @@ exports.getDashboard = asyncHandler(async (req, res) => {
     o.status === "OUT_FOR_DELIVERY" && o.payment_method === "COD" && !o.cod_collected
   ).length;
 
+  // Today's delivered orders — use updatedAt since there's no delivered_at column
   const todayOrders = allRiderOrders.filter(o => {
     if (o.status !== "DELIVERED") return false;
-    if (!o.delivered_at) return false;
-    const deliveredAt = o.delivered_at instanceof Date ? o.delivered_at :
-      (o.delivered_at && typeof o.delivered_at.toDate === 'function' ? o.delivered_at.toDate() : new Date(o.delivered_at));
+    const deliveredAt = o.updatedAt instanceof Date ? o.updatedAt : new Date(o.updatedAt);
     return deliveredAt >= today;
   });
 
-  const todayEarnings = todayOrders.reduce((sum, o) => sum + (parseFloat(o.distance_fee) || 0) + (parseFloat(o.rider_tip) || 0), 0);
-  const todayTips = todayOrders.reduce((sum, o) => sum + (parseFloat(o.rider_tip) || 0), 0);
+  // Today's delivery fee collected (for delivery orders completed today)
+  const todayEarnings = todayOrders.reduce((sum, o) => sum + (parseFloat(o.delivery_fee) || 0), 0);
+  const todayDeliveries = todayOrders.length;
 
   return ApiResponse.success(res, {
     rider_id: rider.id,
     is_available: rider.is_available,
     today_earnings: todayEarnings,
-    today_tips: todayTips,
+    today_deliveries: todayDeliveries,
     completed_orders: completedOrders,
     pending_orders: assignedOrders + outForDeliveryOrders,
     cod_pending_orders: codPendingAssigned + codPendingOut,
     completed_today: todayOrders.length,
-    wallet_balance: 0,
-    cod_pending: 0,
     active_cod_orders: codPendingAssigned + codPendingOut,
     rating: toNumber(rider.rating),
     rating_count: toNumber(rider.rating_count),
@@ -111,14 +108,6 @@ exports.register = asyncHandler(async (req, res) => {
       email,
       role: "RIDER",
       password: null
-    });
-
-    // Create wallet for new user
-    await Wallet.create({
-      user_id: user.id,
-      available_balance: 0,
-      pending_balance: 0,
-      total_earned: 0,
     });
   }
 
@@ -230,32 +219,6 @@ exports.updateLocation = asyncHandler(async (req, res) => {
   rider.current_lng = current_lng;
   await rider.save();
 
-  // Update RTDB (non-blocking — don't crash if RTDB creds are invalid)
-  try {
-    await db.ref(`riders/${rider.id}`).update({
-      lat: current_lat,
-      lng: current_lng,
-      updated_at: Date.now(),
-    });
-  } catch (err) {
-    console.error("[updateLocation] RTDB rider update failed (non-fatal):", err.message);
-  }
-
-  if (activeOrder && activeOrder.status === "OUT_FOR_DELIVERY" && isFirebaseReady) {
-    try {
-      await db.ref(`tracking/orders/${activeOrder.id}`).update({
-        rider_id: rider.id,
-        lat: current_lat,
-        lng: current_lng,
-        status: "OUT_FOR_DELIVERY",
-        is_active: true,
-        updated_at: Date.now(),
-      });
-    } catch (err) {
-      console.error("[updateLocation] RTDB tracking update failed (non-fatal):", err.message);
-    }
-  }
-
   return ApiResponse.success(res, null, "Location updated");
 });
 
@@ -347,60 +310,6 @@ exports.updateFcmToken = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
-const RiderDocument = require("../models/riderDocument");
-
-exports.uploadDocument = asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const { document_type } = req.body;
-  let document_urls = req.body.document_urls;
-
-  if (req.files && req.files.length > 0) {
-    document_urls = req.files.map(file => file.path);
-  }
-
-  // Parse document_urls if it comes as JSON string
-  if (typeof document_urls === 'string') {
-    try {
-      document_urls = JSON.parse(document_urls);
-    } catch (e) {
-      document_urls = [document_urls];
-    }
-  }
-
-  if (!document_type || !document_urls || !Array.isArray(document_urls) || document_urls.length === 0) {
-    return ApiResponse.error(res, "Document type and files are required", 400);
-  }
-
-  if (document_urls.length > 3) {
-    return ApiResponse.error(res, "Maximum 3 files allowed per document", 400);
-  }
-
-  const rider = await Rider.findOne({ where: { user_id: userId } });
-  if (!rider) return ApiResponse.error(res, "Rider not found", 404);
-
-  // Overwrite existing doc of same type
-  const existingDoc = await RiderDocument.findOne({ where: { rider_id: rider.id, document_type } });
-  if (existingDoc) {
-    await RiderDocument.destroy({ where: { id: existingDoc.id } });
-  }
-
-  const doc = await RiderDocument.create({
-    rider_id: rider.id,
-    document_type,
-    document_urls,
-    status: "PENDING"
-  });
-
-  return ApiResponse.success(res, doc, "Document uploaded successfully", 201);
-});
-
-exports.getMyDocuments = asyncHandler(async (req, res) => {
-  const rider = await Rider.findOne({ where: { user_id: req.user.id } });
-  if (!rider) return ApiResponse.error(res, "Rider not found", 404);
-
-  const docs = await RiderDocument.findAll({ where: { rider_id: rider.id } });
-  return ApiResponse.success(res, docs);
-});
 
 exports.getRiderReviews = asyncHandler(async (req, res) => {
   const rider = await Rider.findOne({ where: { user_id: req.user.id } });
@@ -432,65 +341,12 @@ exports.getRiderReviews = asyncHandler(async (req, res) => {
 
 
 exports.requestRadiusChange = asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-  const { new_radius, reason } = req.body;
-
-  if (!new_radius || isNaN(new_radius) || new_radius <= 0) {
-    return ApiResponse.error(res, "Valid new_radius is required", 400);
-  }
-
-  // Validate against Platform Settings
-  const maxRadiusSetting = await PlatformSettings.findOne({ where: { key: "max_rider_radius_km" } });
-  const maxRadius = maxRadiusSetting ? parseFloat(maxRadiusSetting.value) : 5;
-  if (parseFloat(new_radius) > maxRadius) {
-    return ApiResponse.error(res, `Requested radius exceeds the platform limit of ${maxRadius} KM`, 400);
-  }
-
-  const rider = await Rider.findOne({ where: { user_id: userId } });
-  if (!rider) return ApiResponse.error(res, "Rider not found", 404);
-
-  const user = await User.findByPk(userId);
-
-  const existingPending = await RadiusChangeRequest.findOne({
-    where: { user_id: userId, status: "PENDING" }
-  });
-
-  if (existingPending) {
-    return ApiResponse.error(res, "You already have a pending radius change request", 400);
-  }
-
-  const request = await RadiusChangeRequest.create({
-    user_id: userId,
-    rider_id: rider.id,
-    rider_name: user ? user.name : "",
-    current_radius: parseFloat(rider.delivery_radius_km) || 5.0,
-    new_radius: parseFloat(new_radius),
-    reason: reason || "",
-    status: "PENDING"
-  });
-
-  return ApiResponse.success(res, { request_id: request.id }, "Radius change request submitted successfully", 201);
+  // Radius change is managed via platform settings by admin.
+  // Riders cannot directly request radius changes in this system.
+  return ApiResponse.error(res, "Radius change requests are not supported. Contact admin to update delivery radius.", 400);
 });
 
 exports.getRadiusChangeStatus = asyncHandler(async (req, res) => {
-  const userId = req.user.id;
-
-  const existingPending = await RadiusChangeRequest.findOne({
-    where: { user_id: userId, status: "PENDING" }
-  });
-
-  if (existingPending) {
-    return ApiResponse.success(res, {
-      has_pending: true,
-      request: {
-        id: existingPending.id,
-        new_radius: existingPending.new_radius,
-        status: existingPending.status,
-        createdAt: existingPending.createdAt
-      }
-    });
-  }
-
   return ApiResponse.success(res, { has_pending: false });
 });
 

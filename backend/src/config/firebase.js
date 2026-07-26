@@ -1,7 +1,7 @@
 const admin = require("firebase-admin");
 
 const firebaseServiceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
-let isFirebaseReady = false;
+let isFcmReady = false;
 
 if (firebaseServiceAccountRaw) {
   try {
@@ -12,7 +12,6 @@ if (firebaseServiceAccountRaw) {
     ) {
       cleanJson = cleanJson.slice(1, -1);
     }
-    // Clean escaping backslashes from JSON characters that are not valid JSON escape sequences (e.g. \{ -> {, \_ -> _)
     cleanJson = cleanJson.replace(/\\(?!["\\/bfnrtu])/g, "");
 
     const serviceAccount = JSON.parse(cleanJson);
@@ -23,84 +22,27 @@ if (firebaseServiceAccountRaw) {
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        databaseURL:
-          process.env.FIREBASE_DATABASE_URL ||
-          "https://tind-ffb61-default-rtdb.firebaseio.com",
       });
     }
 
-    isFirebaseReady = true;
+    isFcmReady = true;
+    console.log("Firebase FCM Messaging initialized ✅");
   } catch (error) {
-    console.error("Firebase init failed:", error.message);
+    console.error("Firebase FCM init failed:", error.message);
   }
 } else {
-  console.warn("FIREBASE_SERVICE_ACCOUNT not set. Firebase disabled.");
+  console.warn("FIREBASE_SERVICE_ACCOUNT not set. Push notifications (FCM) disabled.");
 }
 
-const dbMock = {
-  ref: () => ({
-    set: async () => undefined,
-    update: async () => undefined,
-  }),
-};
-
-const makeMockQuery = () => {
-  const query = {
-    where: () => query,
-    orderBy: () => query,
-    limit: () => query,
-    offset: () => query,
-    count: () => ({
-      get: async () => ({
-        data: () => ({ count: 0 })
-      })
-    }),
-    get: async () => ({
-      empty: true,
-      docs: []
-    })
-  };
-  return query;
-};
-
-const firestoreMock = {
-  collection: () => {
-    const query = makeMockQuery();
-    return {
-      ...query,
-      doc: () => ({
-        set: async () => undefined,
-        get: async () => ({ exists: false, data: () => undefined }),
-        update: async () => undefined,
-        delete: async () => undefined,
-      }),
-      add: async () => ({ id: "mock" }),
-    };
-  },
-  batch: () => ({
-    update: () => {},
-    delete: () => {},
-    commit: async () => {},
-  }),
-};
-
-const messaging = {
+const mockMessaging = {
   send: async () => undefined,
 };
 
 const mockAdmin = {
-  messaging: () => messaging,
-  firestore: {
-    FieldPath: {
-      documentId: () => "__documentId__"
-    }
-  }
+  messaging: () => mockMessaging,
 };
 
 module.exports = {
-  admin: isFirebaseReady ? admin : mockAdmin,
-  db: isFirebaseReady ? admin.database() : dbMock,
-  firestore: isFirebaseReady ? admin.firestore() : firestoreMock,
-  isFirebaseReady,
+  admin: isFcmReady ? admin : mockAdmin,
+  isFcmReady,
 };
-

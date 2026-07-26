@@ -1,10 +1,23 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const Cart = new FirebaseModel("carts", {
-  user_id: {
-    type: "string",
-    required: true
+const Cart = sequelize.define(
+  "Cart",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+  },
+  {
+    tableName: "carts",
+    timestamps: true,
   }
-});
+);
 
 module.exports = Cart;

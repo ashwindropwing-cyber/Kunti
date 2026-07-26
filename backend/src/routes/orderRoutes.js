@@ -1,43 +1,45 @@
 const express = require("express");
 const router = express.Router();
 const orderController = require("../controllers/orderController");
-const paymentController = require("../controllers/paymentController"); // ✅ ADD THIS
+const paymentController = require("../controllers/paymentController");
 const { verifyToken, allowRoles } = require("../middlewares/authMiddleware");
-const upload = require("../utils/uploadPod");
-const { pollingLimiter, heavyReadLimiter, uploadLimiter } = require("../middlewares/rateLimiter");
+const { pollingLimiter } = require("../middlewares/rateLimiter");
 const { cacheFor } = require("../middlewares/responseCache");
 
 /**
- * =========================
  * CUSTOMER ROUTES
- * =========================
  */
-
-// Place Master Order (from cart)
+// Create / Place Order
+router.post(
+  "/create",
+  verifyToken,
+  allowRoles("CUSTOMER"),
+  orderController.createOrder
+);
 router.post(
   "/place",
   verifyToken,
   allowRoles("CUSTOMER"),
-  orderController.placeOrder
+  orderController.createOrder
 );
 
-// Get my orders
+// Get Customer Orders
 router.get(
   "/my",
   verifyToken,
   allowRoles("CUSTOMER"),
-  orderController.getMyOrders
+  orderController.getUserOrders
 );
 
-// Cancel order
+// Cancel Order
 router.patch(
   "/cancel/:id",
   verifyToken,
-  allowRoles("CUSTOMER"),
+  allowRoles("CUSTOMER", "ADMIN"),
   orderController.cancelOrder
 );
 
-// ✅ ADD THIS: Verify Razorpay payment
+// Verify Payment
 router.post(
   "/verify-payment",
   verifyToken,
@@ -45,100 +47,55 @@ router.post(
   paymentController.verifyPayment
 );
 
-// Submit Review for a delivered order
-router.post(
-  "/:id/review",
-  verifyToken,
-  allowRoles("CUSTOMER"),
-  orderController.addOrderReview
-);
-
-// Customer → Get live rider tracking for an order
+// Get Order Tracking (Status)
 router.get(
   "/tracking/:id",
   verifyToken,
-  allowRoles("CUSTOMER"),
+  allowRoles("CUSTOMER", "RIDER", "ADMIN"),
   pollingLimiter,
   cacheFor(10),
   orderController.getOrderTracking
 );
 
-// Customer → Submit Refund Request
-router.post(
-  "/refund/submit",
-  verifyToken,
-  allowRoles("CUSTOMER"),
-  require("../controllers/refundController").requestRefund
-);
-
 /**
- * =========================
- * ADMIN ROUTES
- * =========================
+ * ADMIN ROUTES — declared BEFORE /:id wildcard to prevent route shadowing
  */
-
-
-// Admin → Get all refund requests
+// Get All Orders
 router.get(
-  "/admin/refunds/all",
+  "/admin/all",
   verifyToken,
   allowRoles("ADMIN"),
-  require("../controllers/refundController").getAllRefunds
+  orderController.getAllOrders
 );
 
-// Admin: update order status directly
+// Update Single Order Status
 router.patch(
   "/admin/:id/status",
   verifyToken,
   allowRoles("ADMIN"),
+  orderController.updateOrderStatus
 );
 
-// Assign rider to master order
+// Assign Rider to Single Order
 router.patch(
-  "/assign/:id",
+  "/admin/assign/:id",
   verifyToken,
   allowRoles("ADMIN"),
   orderController.assignRider
 );
 
+// Bulk Assign Multiple Orders to One Delivery Guy
+router.patch(
+  "/admin/bulk-assign",
+  verifyToken,
+  allowRoles("ADMIN"),
+  orderController.bulkAssignRider
+);
+
 /**
- * =========================
- * RIDER ROUTES
- * =========================
+ * RIDER ROUTES — declared BEFORE /:id wildcard to prevent route shadowing
  */
-
-router.patch(
-  "/pick-up/:id",
-  verifyToken,
-  allowRoles("RIDER"),
-  orderController.pickUpOrder
-);
-
-router.patch(
-  "/start-delivery/:id",
-  verifyToken,
-  allowRoles("RIDER"),
-  orderController.startDelivery
-);
-
-
-
-// Rider delivers order (POD required)
-router.patch(
-  "/deliver/:id",
-  verifyToken,
-  allowRoles("RIDER"),
-  uploadLimiter,
-  upload.fields([
-    { name: "pod", maxCount: 1 },
-    { name: "image", maxCount: 1 },
-    { name: "file", maxCount: 1 },
-  ]),
-  orderController.deliverOrder
-);
-
-
-
+// Get Rider Assigned Orders (supports multiple active / bulk assigned orders)
 router.get(
   "/rider/my",
   verifyToken,
@@ -146,18 +103,31 @@ router.get(
   orderController.getRiderOrders
 );
 
-router.get(
-  "/rider/:id",
+// Rider updates status of a single assigned order (ASSIGNED → PREPARING → OUT_FOR_DELIVERY → DELIVERED)
+router.patch(
+  "/rider/:id/status",
   verifyToken,
   allowRoles("RIDER"),
-  orderController.getRiderOrderDetails
+  orderController.riderUpdateOrderStatus
 );
 
-// Get single order details
+// Bulk Update Rider Orders Status (e.g., deliver multiple orders at once)
+router.patch(
+  "/rider/bulk-status",
+  verifyToken,
+  allowRoles("RIDER", "ADMIN"),
+  orderController.bulkUpdateRiderOrders
+);
+
+/**
+ * GENERIC WILDCARD — MUST be declared last
+ */
+// Get Single Order Details
 router.get(
   "/:id",
   verifyToken,
-  allowRoles("CUSTOMER"),
-  orderController.getOrderDetails
+  allowRoles("CUSTOMER", "ADMIN", "RIDER"),
+  orderController.getOrderById
 );
+
 module.exports = router;

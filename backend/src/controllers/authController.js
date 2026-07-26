@@ -1,6 +1,5 @@
 const User = require("../models/user");
 const OTP = require("../models/otp");
-const Wallet = require("../models/wallet");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -271,19 +270,9 @@ exports.verifyRiderOTP = asyncHandler(async (req, res) => {
   );
 
   const Rider = require("../models/rider");
-  const RiderDocument = require("../models/riderDocument");
 
   let extraData = await Rider.findOne({ where: { user_id: user.id } });
   let documents = [];
-
-  if (extraData) {
-    const docs = await RiderDocument.findAll({ where: { rider_id: extraData.id } });
-    documents = docs.map((d) => ({
-      type: d.document_type,
-      file_path: d.document_url,
-      status: (d.status === "VERIFIED" || d.status === "APPROVED") ? "VERIFIED" : d.status === "REJECTED" ? "REJECTED" : "UPLOADED"
-    }));
-  }
 
   return ApiResponse.success(res, {
     token,

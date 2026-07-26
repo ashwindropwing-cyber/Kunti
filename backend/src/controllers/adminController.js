@@ -1,13 +1,9 @@
+const { Op } = require("sequelize");
 const User = require("../models/user");
 const Rider = require("../models/rider");
-const Wallet = require("../models/wallet");
 const MasterOrder = require("../models/masterOrder");
 const Product = require("../models/product");
-const WalletTransaction = require("../models/walletTransaction");
 const Review = require("../models/review");
-const WithdrawalRequest = require("../models/withdrawalRequest");
-const RefundRequest = require("../models/refundRequest");
-const { firestore } = require("../config/firebase");
 
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
@@ -24,19 +20,17 @@ exports.getDashboardMetrics = asyncHandler(async (req, res) => {
     totalOrders,
     totalProducts,
     pendingRiders,
-    pendingWithdrawals,
+    todayOrders,
+    deliveredOrders,
   ] = await Promise.all([
     User.count(),
     Rider.count(),
     MasterOrder.count(),
     Product.count(),
-    Rider.count({ where: { is_approved: false } }),
-    WithdrawalRequest.count({ where: { status: "PENDING" } }),
+    Rider.count({ where: { is_verified: false } }),
+    MasterOrder.count({ where: { createdAt: { [Op.gte]: today } } }),
+    MasterOrder.count({ where: { status: "DELIVERED" } }),
   ]);
-
-  const totalPendingApprovals =
-    pendingRiders +
-    pendingWithdrawals;
 
   return ApiResponse.success(res, {
     overview: {
@@ -44,11 +38,12 @@ exports.getDashboardMetrics = asyncHandler(async (req, res) => {
       riders: totalRiders,
       orders: totalOrders,
       products: totalProducts,
+      today_orders: todayOrders,
+      delivered_orders: deliveredOrders,
     },
     pending_approvals: {
-      total: totalPendingApprovals,
+      total: pendingRiders,
       riders: pendingRiders,
-      withdrawals: pendingWithdrawals,
     },
   });
 });
@@ -76,13 +71,6 @@ exports.createRiderByAdmin = asyncHandler(async (req, res) => {
     is_available: true,
   });
 
-  await Wallet.create({
-    user_id: user.id,
-    available_balance: 0,
-    pending_balance: 0,
-    total_earned: 0,
-  });
-
   return ApiResponse.success(res, {
     rider_id: rider.id,
     user_id: user.id,
@@ -94,22 +82,19 @@ exports.getAllRiders = asyncHandler(async (req, res) => {
     order: [["createdAt", "DESC"]],
   });
 
-  // Bulk-fetch user data and order data for all riders
+  // Bulk-fetch user data for all riders in one query
   const riderUserIds = [...new Set(riders.map(r => r.user_id).filter(Boolean))];
   let riderUsers = [];
   if (riderUserIds.length > 0) {
-    riderUsers = await User.findAll({ where: { id: { in: riderUserIds } } });
+    riderUsers = await User.findAll({ where: { id: { [Op.in]: riderUserIds } } });
   }
   const riderUserMap = riderUsers.reduce((acc, u) => { acc[u.id] = u; return acc; }, {});
 
-  // Bulk-fetch all rider orders at once
+  // Bulk-fetch all rider orders in one query (PostgreSQL has no 'in' limit)
   const riderIds = riders.map(r => r.id);
   let allRiderOrders = [];
-  // Firestore 'in' is limited to 10, so chunk it
-  for (let i = 0; i < riderIds.length; i += 10) {
-    const chunk = riderIds.slice(i, i + 10);
-    const batch = await MasterOrder.findAll({ where: { rider_id: { in: chunk } } });
-    allRiderOrders = allRiderOrders.concat(batch);
+  if (riderIds.length > 0) {
+    allRiderOrders = await MasterOrder.findAll({ where: { rider_id: { [Op.in]: riderIds } } });
   }
   // Group orders by rider_id
   const riderOrdersMap = {};
@@ -300,50 +285,18 @@ exports.verifyRider = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, rider, `Rider ${is_verified ? "verified" : "unverified"} successfully`);
 });
 
-const RiderDocument = require("../models/riderDocument");
-
-exports.uploadRiderDocumentByAdmin = asyncHandler(async (req, res) => {
-  const { id } = req.params; // rider_id
-  const { document_type } = req.body;
-  let document_url = req.body.document_url;
-  if (req.file) {
-    document_url = req.file.path;
-  }
-
-  if (!document_type || !document_url) {
-    return ApiResponse.error(res, "Document type and file are required", 400);
-  }
-
-  const rider = await Rider.findByPk(id);
-  if (!rider) return ApiResponse.error(res, "Rider not found", 404);
-
-  const doc = await RiderDocument.create({
-    rider_id: id,
-    document_type,
-    document_url,
-    status: "APPROVED",
-    verified_at: new Date(),
-  });
-
-  return ApiResponse.success(res, doc, "Document uploaded by admin", 201);
-});
-
 exports.getRiderById = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const rider = await Rider.findByPk(id);
   if (!rider) return ApiResponse.error(res, "Rider not found", 404);
 
   const user = await User.findByPk(rider.user_id);
-  const wallet = await Wallet.findOne({ where: { user_id: rider.user_id } });
-  const bankAccount = null;
-  
-  const masterOrders = await MasterOrder.findAll({ 
+
+  const masterOrders = await MasterOrder.findAll({
     where: { rider_id: rider.id },
     order: [["createdAt", "DESC"]],
     limit: 10
   });
-
-  const documents = await RiderDocument.findAll({ where: { rider_id: rider.id } });
 
   let deliveredCount = 0;
   let codInHand = 0;
@@ -357,9 +310,6 @@ exports.getRiderById = asyncHandler(async (req, res) => {
   const formatted = {
     ...rider.toJSON(),
     User: user ? { id: user.id, name: user.name, phone: user.phone, email: user.email } : null,
-    Wallet: wallet,
-    BankAccount: bankAccount,
-    Documents: documents,
     RecentOrders: masterOrders,
     analytics: { delivered_orders: deliveredCount, cod_in_hand: codInHand }
   };
@@ -452,53 +402,16 @@ exports.confirmOrderPayment = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Only COD orders can be manually confirmed", 400);
   }
   if (order.cod_collected) {
-    return ApiResponse.error(res, "Cash already collected from rider for this order", 400);
+    return ApiResponse.error(res, "Cash already collected for this order", 400);
   }
 
-  // 1. Update Order status
+  // Mark cash as collected and payment as paid
   order.is_paid = true;
-  order.payment_status = "COMPLETED";
-  order.cod_collected = true; // Mark as collected from rider
+  order.payment_status = "PAID";
+  order.cod_collected = true;
   await order.save();
 
-  // 2. Handle Rider Wallet (Offset the DEBIT from COD_COLLECTED)
-  if (order.rider_id) {
-    const rider = await Rider.findByPk(order.rider_id);
-    if (rider) {
-      const riderUserId = rider.user_id;
-      const totalAmount = parseFloat(order.total_amount) || 0;
-
-      // Create a credit transaction for the deposit
-      await WalletTransaction.create({
-        user_id: riderUserId,
-        master_order_id: order.id,
-        type: "CREDIT",
-        amount: totalAmount,
-        source: "CASH_DEPOSIT",
-        description: `Cash deposit for COD order ${order.id}`,
-        status: "SUCCESS"
-      });
-
-      // Update Rider Wallet Balance
-      let riderWallet = await Wallet.findOne({
-        where: { user_id: riderUserId },
-      });
-      if (!riderWallet) {
-        riderWallet = await Wallet.create({
-          user_id: riderUserId,
-          available_balance: 0,
-          pending_balance: 0,
-          total_earned: 0,
-        });
-      }
-      
-      riderWallet.available_balance =
-        parseFloat(riderWallet.available_balance) + totalAmount;
-      await riderWallet.save();
-    }
-  }
-
-  return ApiResponse.success(res, order, "Payment confirmed and rider wallet updated");
+  return ApiResponse.success(res, order, "COD payment confirmed successfully");
 });
 
 // ======================================

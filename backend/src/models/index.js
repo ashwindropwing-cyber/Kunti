@@ -1,44 +1,87 @@
+const sequelize = require("../config/database");
+const User = require("./user");
+const Category = require("./category");
 const Product = require("./product");
 const Cart = require("./cart");
 const CartItem = require("./cartItem");
-const Category = require("./category");
+const CustomerAddress = require("./customerAddress");
 const MasterOrder = require("./masterOrder");
 const OrderItem = require("./orderItem");
-const User = require("./user");
-const CustomerAddress = require("./customerAddress");
 const Rider = require("./rider");
-const Wallet = require("./wallet");
 const Banner = require("./banner");
-const RiderDocument = require("./riderDocument");
 const PlatformSettings = require("./platformSettings");
 const Wishlist = require("./wishlist");
-const RefundRequest = require("./refundRequest");
-const WalletTransaction = require("./walletTransaction");
 const Otp = require("./otp");
 const Review = require("./review");
-const WithdrawalRequest = require("./withdrawalRequest");
 
-// =======================
-// Export Models
-// =======================
+// ==========================================
+// Define Sequelize Relational Associations
+// ==========================================
+
+// Category <-> Product
+Category.hasMany(Product, { foreignKey: "category_id", as: "products" });
+Product.belongsTo(Category, { foreignKey: "category_id", as: "category" });
+
+// User <-> CustomerAddress
+User.hasMany(CustomerAddress, { foreignKey: "user_id", as: "addresses" });
+CustomerAddress.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+// User <-> Cart
+User.hasOne(Cart, { foreignKey: "user_id", as: "cart" });
+Cart.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+// Cart <-> CartItem <-> Product
+Cart.hasMany(CartItem, { foreignKey: "cart_id", as: "items" });
+CartItem.belongsTo(Cart, { foreignKey: "cart_id", as: "cart" });
+CartItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+Product.hasMany(CartItem, { foreignKey: "product_id" });
+
+// User <-> MasterOrder <-> OrderItem
+User.hasMany(MasterOrder, { foreignKey: "user_id", as: "orders" });
+MasterOrder.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+MasterOrder.hasMany(OrderItem, { foreignKey: "master_order_id", as: "items" });
+OrderItem.belongsTo(MasterOrder, { foreignKey: "master_order_id", as: "order" });
+
+OrderItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+Product.hasMany(OrderItem, { foreignKey: "product_id" });
+
+// MasterOrder <-> CustomerAddress
+MasterOrder.belongsTo(CustomerAddress, { foreignKey: "address_id", as: "address" });
+
+// User <-> Rider <-> MasterOrder
+User.hasOne(Rider, { foreignKey: "user_id", as: "rider" });
+Rider.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+Rider.hasMany(MasterOrder, { foreignKey: "rider_id", as: "assigned_orders" });
+MasterOrder.belongsTo(Rider, { foreignKey: "rider_id", as: "rider" });
+
+// User <-> Wishlist <-> Product
+User.hasMany(Wishlist, { foreignKey: "user_id", as: "wishlist" });
+Wishlist.belongsTo(User, { foreignKey: "user_id", as: "user" });
+Wishlist.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
+// User <-> Review
+User.hasMany(Review, { foreignKey: "user_id", as: "reviews" });
+Review.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+Review.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+Review.belongsTo(Rider, { foreignKey: "rider_id", as: "rider" });
+
 module.exports = {
+  sequelize,
+  User,
+  Category,
   Product,
   Cart,
   CartItem,
-  Category,
+  CustomerAddress,
   MasterOrder,
   OrderItem,
-  User,
-  CustomerAddress,
   Rider,
-  Wishlist,
-  Wallet,
   Banner,
-  RiderDocument,
   PlatformSettings,
-  RefundRequest,
-  WalletTransaction,
+  Wishlist,
   Otp,
   Review,
-  WithdrawalRequest
 };

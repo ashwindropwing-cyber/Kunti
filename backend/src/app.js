@@ -18,25 +18,19 @@ const { globalLimiter } = require("./middlewares/rateLimiter");
 const orderRoutes = require("./routes/orderRoutes");
 const webhookRoutes = require("./routes/webhookRoutes");
 const cron = require("node-cron");
-const withdrawalRoutes = require("./routes/withdrawalRoutes");
 const platformRoutes = require("./routes/platformRoutes");
 const compression = require("compression");
 
 require("./models/user");
 require("./models/rider");
 require("./models/product");
-require("./models/wallet");
-require("./models/walletTransaction");
 require("./models/cart");
 require("./models/cartItem");
 require("./models");
 require("./config/razorpay");
-require("./models/withdrawalRequest");
 require("./models/platformSettings");
-require("./models/riderDocument");
 const bannerRoutes = require("./routes/bannerRoutes");
 const app = express();
-const walletRoutes = require("./routes/walletRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 
 // ─── Static Files ────────────────────────────────────────────────────
@@ -147,27 +141,26 @@ app.use("/api/cart", require("./routes/cartRoutes"));
 app.use("/api/address", addressRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/orders", orderRoutes);
-app.use("/api/wallet", walletRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/webhook", webhookRoutes);
-app.use("/api/withdrawal", withdrawalRoutes);
 app.use("/api/profile", require("./routes/profileRoutes"));
 app.use("/api/platform", platformRoutes);
-app.use("/api/refunds", require("./routes/refundRoutes"));
-
 app.use("/api/wishlist", require("./routes/wishlistRoutes"));
 app.use(require("./middlewares/errorHandler"));
 
 
-const { isFirebaseReady, firestore } = require("./config/firebase");
-
-let dbReady = isFirebaseReady;
+const { sequelize } = require("./models");
 
 (async () => {
-  if (isFirebaseReady) {
-    console.log("Firebase Firestore connected ✅");
+  try {
+    await sequelize.authenticate();
+    console.log("SQL Database connected successfully ✅");
 
-    // Seed default platform settings once on startup (prevents race conditions)
+    // Sync database schema
+    await sequelize.sync({ alter: false });
+    console.log("SQL Database schema synced ✅");
+
+    // Seed default platform settings once on startup
     try {
       const { ensureDefaultSettings, DEFAULT_SETTINGS } = require("./controllers/platformController");
       await ensureDefaultSettings(DEFAULT_SETTINGS.map(s => s.key));
@@ -176,12 +169,10 @@ let dbReady = isFirebaseReady;
       console.error("Failed to seed default platform settings:", settingsError.message);
     }
 
-    require("./jobs/payoutRetryJob");
     require("./jobs/autoCancelOrders");
-    require("./jobs/deleteOldPodImages");
     require("./jobs/stuckOrderRecovery");
-  } else {
-    console.error("Firebase connection FAILED ❌");
+  } catch (error) {
+    console.error("SQL Database connection FAILED ❌", error.message);
   }
 })();
 

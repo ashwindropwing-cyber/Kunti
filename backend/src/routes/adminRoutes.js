@@ -77,16 +77,6 @@ router.patch(
   adminController.verifyRider
 );
 
-const upload = require("../utils/upload");
-router.post(
-  "/rider/:id/documents",
-  verifyToken,
-  allowRoles("ADMIN"),
-  uploadLimiter,
-  upload.single("document"),
-  adminController.uploadRiderDocumentByAdmin
-);
-
 // USER MANAGEMENT
 router.get(
   "/users",

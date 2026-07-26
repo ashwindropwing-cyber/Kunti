@@ -1,23 +1,39 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const Category = new FirebaseModel("categories", {
-  name: {
-    type: "string",
-    required: true
+const Category = sequelize.define(
+  "Category",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    image_url: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    display_order: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+    },
   },
-  banner_image: {
-    type: "string",
-    required: false
-  },
-  icon: {
-    type: "string",
-    required: false
-  },
-  is_active: {
-    type: "boolean",
-    required: false,
-    default: true
+  {
+    tableName: "categories",
+    timestamps: true,
   }
-});
+);
 
 module.exports = Category;

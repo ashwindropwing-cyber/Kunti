@@ -1,50 +1,63 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const Product = new FirebaseModel("products", {
-  category_id: {
-    type: "string",
-    required: true
+const Product = sequelize.define(
+  "Product",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    category_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    price: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+    discount_price: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
+    image_url: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    is_veg: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    is_available: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    stock_quantity: {
+      type: DataTypes.INTEGER,
+      defaultValue: 100,
+    },
+    rating: {
+      type: DataTypes.FLOAT,
+      defaultValue: 0,
+    },
+    rating_count: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+    },
   },
-  name: {
-    type: "string",
-    required: true
-  },
-  mrp: {
-    type: "number",
-    required: true
-  },
-  selling_price: {
-    type: "number",
-    required: true
-  },
-  image_url: {
-    type: "string",
-    required: false
-  },
-  quantity: {
-    type: "number",
-    required: true,
-    default: 0
-  },
-  description: {
-    type: "string",
-    required: false
-  },
-  is_active: {
-    type: "boolean",
-    required: false,
-    default: true
-  },
-  rating: {
-    type: "number",
-    required: false,
-    default: 0
-  },
-  rating_count: {
-    type: "number",
-    required: false,
-    default: 0
+  {
+    tableName: "products",
+    timestamps: true,
   }
-});
+);
 
 module.exports = Product;

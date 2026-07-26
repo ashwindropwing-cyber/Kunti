@@ -1,106 +1,101 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const MasterOrder = new FirebaseModel("master_orders", {
-  customer_id: {
-    type: "string",
-    required: true
+const MasterOrder = sequelize.define(
+  "MasterOrder",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    order_number: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    address_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    rider_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    subtotal: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    delivery_fee: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    tax_amount: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    total_amount: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    payment_method: {
+      type: DataTypes.STRING,
+      defaultValue: "COD", // 'COD', 'ONLINE'
+    },
+    payment_status: {
+      type: DataTypes.STRING,
+      defaultValue: "PENDING", // 'PENDING', 'PAID', 'FAILED'
+    },
+    status: {
+      type: DataTypes.STRING,
+      defaultValue: "PLACED", // 'PLACED' → 'ACCEPTED' → 'PREPARING' → 'ASSIGNED' → 'OUT_FOR_DELIVERY' → 'DELIVERED' | 'CANCELLED'
+    },
+    razorpay_order_id: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    razorpay_payment_id: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    delivery_address: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    order_type: {
+      type: DataTypes.STRING,
+      defaultValue: "DELIVERY", // 'DELIVERY' | 'DINE_IN'
+      allowNull: false,
+    },
+    table_number: {
+      type: DataTypes.STRING,
+      allowNull: true, // only for DINE_IN orders
+    },
+    is_paid: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    cod_collected: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false, // true after admin confirms cash collected from rider
+    },
   },
-  rider_id: {
-    type: "string",
-    required: false
-  },
-  delivery_address_id: {
-    type: "string",
-    required: false
-  },
-  payment_expired_at: {
-    type: "string",
-    required: false
-  },
-  total_amount: {
-    type: "number",
-    required: true
-  },
-  delivery_fee: {
-    type: "number",
-    required: true,
-    default: 0
-  },
-  payment_method: {
-    type: "string",
-    required: true
-  },
-  is_paid: {
-    type: "boolean",
-    required: false,
-    default: false
-  },
-  payment_id: {
-    type: "string",
-    required: false
-  },
-  delivered_at: {
-    type: "string",
-    required: false
-  },
-  razorpay_order_id: {
-    type: "string",
-    required: false
-  },
-  payment_status: {
-    type: "string",
-    required: false,
-    default: "PENDING"
-  },
-  pod_image: {
-    type: "string",
-    required: false
-  },
-  cod_collected: {
-    type: "boolean",
-    required: false,
-    default: false
-  },
-  status: {
-    type: "string",
-    required: false,
-    default: "PENDING"
-  },
-  offered_rider_id: {
-    type: "string",
-    required: false
-  },
-  rider_rejected_ids: {
-    type: "string",
-    required: true,
-    default: "[]"
-  },
-  rider_tip: {
-    type: "number",
-    required: true,
-    default: 0
-  },
-  is_for_friend: {
-    type: "boolean",
-    required: false,
-    default: false
-  },
-  friend_name: {
-    type: "string",
-    required: false
-  },
-  friend_phone: {
-    type: "string",
-    required: false
-  },
-  cancel_reason: {
-    type: "string",
-    required: false
-  },
-  cancelled_by: {
-    type: "string",
-    required: false
+  {
+    tableName: "master_orders",
+    timestamps: true,
   }
-});
+);
 
 module.exports = MasterOrder;

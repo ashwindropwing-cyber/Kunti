@@ -1,23 +1,35 @@
-const FirebaseModel = require("./firebaseModel");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const OTP = new FirebaseModel("otps", {
-  phone: {
-    type: "string",
-    required: true
+const OTP = sequelize.define(
+  "OTP",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    phone: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    otp: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    attempts: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+    },
+    expires_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
   },
-  otp: {
-    type: "string",
-    required: true
-  },
-  expires_at: {
-    type: "string",
-    required: true
-  },
-  attempts: {
-    type: "number",
-    required: false,
-    default: 0
+  {
+    tableName: "otps",
+    timestamps: true,
   }
-});
+);
 
 module.exports = OTP;

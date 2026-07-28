@@ -31,6 +31,15 @@ const MasterOrder = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    discount_amount: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    coupon_code: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     delivery_fee: {
       type: DataTypes.FLOAT,
       allowNull: false,

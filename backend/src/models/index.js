@@ -13,6 +13,8 @@ const PlatformSettings = require("./platformSettings");
 const Wishlist = require("./wishlist");
 const Otp = require("./otp");
 const Review = require("./review");
+const Coupon = require("./coupon");
+const CouponUsage = require("./couponUsage");
 
 // ==========================================
 // Define Sequelize Relational Associations
@@ -68,6 +70,16 @@ Review.belongsTo(User, { foreignKey: "user_id", as: "user" });
 Review.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 Review.belongsTo(Rider, { foreignKey: "rider_id", as: "rider" });
 
+// Coupon <-> CouponUsage <-> User / MasterOrder
+User.hasMany(CouponUsage, { foreignKey: "user_id", as: "coupon_usages" });
+CouponUsage.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+Coupon.hasMany(CouponUsage, { foreignKey: "coupon_id", as: "usages" });
+CouponUsage.belongsTo(Coupon, { foreignKey: "coupon_id", as: "coupon" });
+
+MasterOrder.hasOne(CouponUsage, { foreignKey: "master_order_id", as: "coupon_usage" });
+CouponUsage.belongsTo(MasterOrder, { foreignKey: "master_order_id", as: "order" });
+
 module.exports = {
   sequelize,
   User,
@@ -84,4 +96,6 @@ module.exports = {
   Wishlist,
   Otp,
   Review,
+  Coupon,
+  CouponUsage,
 };

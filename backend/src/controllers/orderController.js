@@ -1,9 +1,10 @@
 const { Op } = require("sequelize");
-const { MasterOrder, OrderItem, Cart, CartItem, Product, User, CustomerAddress, Rider, PlatformSettings, sequelize } = require("../models");
+const { MasterOrder, OrderItem, Cart, CartItem, Product, User, CustomerAddress, Rider, PlatformSettings, Coupon, CouponUsage, sequelize } = require("../models");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
 const { calculateRoadDistance } = require("../utils/geoUtils");
 const { getPlatformSettingsMap } = require("./platformController");
+const { validateCoupon } = require("./couponController");
 
 // Helper: Generate unique order number (e.g., KUNTI-100234)
 function generateOrderNumber() {
@@ -14,7 +15,7 @@ function generateOrderNumber() {
 // ─── CREATE ORDER ─────────────────────────────────────────────────────────────
 exports.createOrder = asyncHandler(async (req, res) => {
   const userId = req.user.id;
-  const { address_id, payment_method, notes, order_type, table_number } = req.body;
+  const { address_id, payment_method, notes, order_type, table_number, coupon_code } = req.body;
 
   // Validate order type — default to DELIVERY
   const validOrderTypes = ["DELIVERY", "DINE_IN"];
@@ -106,6 +107,19 @@ exports.createOrder = asyncHandler(async (req, res) => {
     });
   }
 
+  // ── Validate Coupon (if provided) ─────────────────────────────────────────
+  let discountAmount = 0;
+  let appliedCoupon = null;
+
+  if (coupon_code && coupon_code.trim().length > 0) {
+    const couponRes = await validateCoupon(coupon_code, userId, subtotal);
+    if (!couponRes.valid) {
+      return ApiResponse.error(res, couponRes.message, 400);
+    }
+    discountAmount = couponRes.discount;
+    appliedCoupon = couponRes.coupon;
+  }
+
   // ── Calculate Delivery Fee (DELIVERY only) ────────────────────────────────
   if (selectedOrderType === "DELIVERY") {
     deliveryFee = estimatedDistance <= 3 ? deliveryFee0to3 : deliveryFee3to5;
@@ -115,7 +129,7 @@ exports.createOrder = asyncHandler(async (req, res) => {
   }
   // DINE_IN orders: no delivery fee
 
-  const totalAmount = subtotal + deliveryFee;
+  const totalAmount = Math.max(0, subtotal - discountAmount) + deliveryFee;
 
   // ── Execute SQL Transaction ───────────────────────────────────────────────
   const result = await sequelize.transaction(async (t) => {
@@ -128,6 +142,8 @@ exports.createOrder = asyncHandler(async (req, res) => {
         table_number: selectedOrderType === "DINE_IN" ? table_number : null,
         address_id: address ? address.id : null,
         subtotal,
+        discount_amount: discountAmount,
+        coupon_code: appliedCoupon ? appliedCoupon.code : null,
         delivery_fee: deliveryFee,
         total_amount: totalAmount,
         payment_method: selectedPaymentMethod,
@@ -165,7 +181,25 @@ exports.createOrder = asyncHandler(async (req, res) => {
       });
     }
 
-    // 3. Clear Customer Cart
+    // 3. Record Coupon Usage & Increment Counter (if coupon applied)
+    if (appliedCoupon) {
+      await CouponUsage.create(
+        {
+          user_id: userId,
+          coupon_id: appliedCoupon.id,
+          master_order_id: masterOrder.id,
+        },
+        { transaction: t }
+      );
+
+      await Coupon.increment("used_count", {
+        by: 1,
+        where: { id: appliedCoupon.id },
+        transaction: t,
+      });
+    }
+
+    // 4. Clear Customer Cart
     await CartItem.destroy({ where: { cart_id: cart.id }, transaction: t });
 
     return masterOrder;

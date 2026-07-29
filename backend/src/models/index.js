@@ -15,6 +15,7 @@ const Otp = require("./otp");
 const Review = require("./review");
 const Coupon = require("./coupon");
 const CouponUsage = require("./couponUsage");
+const Notification = require("./notification");
 
 // ==========================================
 // Define Sequelize Relational Associations
@@ -98,4 +99,5 @@ module.exports = {
   Review,
   Coupon,
   CouponUsage,
+  Notification,
 };

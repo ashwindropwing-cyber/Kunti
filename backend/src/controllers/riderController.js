@@ -67,6 +67,12 @@ exports.getDashboard = asyncHandler(async (req, res) => {
     active_cod_orders: codPendingAssigned + codPendingOut,
     rating: toNumber(rider.rating),
     rating_count: toNumber(rider.rating_count),
+    acceptance_rate: rider.acceptance_rate != null ? rider.acceptance_rate : 98.5,
+    completion_rate: rider.completion_rate != null ? rider.completion_rate : 100.0,
+    emergency_contact: rider.emergency_contact || "",
+    bank_details: rider.bank_details || {},
+    vehicle_type: rider.vehicle_type,
+    vehicle_number: rider.vehicle_number,
   });
 });
 
@@ -345,6 +351,25 @@ exports.requestRadiusChange = asyncHandler(async (req, res) => {
   // Riders cannot directly request radius changes in this system.
   return ApiResponse.error(res, "Radius change requests are not supported. Contact admin to update delivery radius.", 400);
 });
+
+exports.getRiderNotifications = asyncHandler(async (req, res) => {
+  const { Op } = require("sequelize");
+  const Notification = require("../models/notification");
+  
+  const notifications = await Notification.findAll({
+    where: {
+      [Op.or]: [
+        { target_audience: "RIDERS" },
+        { target_audience: "ALL" },
+        { user_id: req.user.id }
+      ]
+    },
+    order: [["createdAt", "DESC"]]
+  });
+
+  return ApiResponse.success(res, notifications);
+});
+
 
 exports.getRadiusChangeStatus = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { has_pending: false });

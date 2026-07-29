@@ -246,11 +246,12 @@ exports.getPaymentReport = asyncHandler(async (req, res) => {
 
 // ─── GENERIC IMAGE UPLOAD ─────────────────────────────────────────────────────
 exports.uploadImage = asyncHandler(async (req, res) => {
-    if (!req.file) {
+    const file = req.file || (req.files && req.files.length > 0 ? req.files[0] : null);
+    if (!file) {
         return ApiResponse.error(res, "No file uploaded", 400);
     }
-    const fileUrl = `/uploads/${req.file.filename}`;
-    return ApiResponse.success(res, { url: fileUrl }, "Image uploaded successfully");
+    const fileUrl = file.filename ? `/uploads/${file.filename}` : (file.path || "");
+    return ApiResponse.success(res, { url: fileUrl, imageUrl: fileUrl }, "Image uploaded successfully");
 });
 
 exports.getPlatformSettingsMap = getPlatformSettingsMap;

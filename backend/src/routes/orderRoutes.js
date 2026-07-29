@@ -111,6 +111,14 @@ router.patch(
   orderController.riderUpdateOrderStatus
 );
 
+// Rider verifies delivery OTP with customer
+router.post(
+  "/rider/verify-otp/:id",
+  verifyToken,
+  allowRoles("RIDER"),
+  orderController.verifyDeliveryOTP
+);
+
 // Bulk Update Rider Orders Status (e.g., deliver multiple orders at once)
 router.patch(
   "/rider/bulk-status",

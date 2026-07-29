@@ -159,6 +159,7 @@ exports.createOrder = asyncHandler(async (req, res) => {
               address_type: address.address_type,
             }
           : null,
+        delivery_otp: Math.floor(1000 + Math.random() * 9000).toString(),
         notes: notes || null,
       },
       { transaction: t }
@@ -563,3 +564,39 @@ exports.riderUpdateOrderStatus = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, order, `Order status updated to ${status}`);
 });
+
+// ─── VERIFY DELIVERY OTP (RIDER) ─────────────────────────────────────────────
+exports.verifyDeliveryOTP = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { otp } = req.body;
+
+  if (!otp) return ApiResponse.error(res, "OTP code is required", 400);
+
+  const rider = await Rider.findOne({ where: { user_id: req.user.id } });
+  if (!rider) return ApiResponse.error(res, "Rider profile not found", 404);
+
+  const order = await MasterOrder.findByPk(id);
+  if (!order) return ApiResponse.error(res, "Order not found", 404);
+
+  if (order.rider_id !== rider.id) {
+    return ApiResponse.error(res, "This order is not assigned to you", 403);
+  }
+
+  if (order.status === "DELIVERED") {
+    return ApiResponse.error(res, "Order is already delivered", 400);
+  }
+
+  if (order.delivery_otp && order.delivery_otp !== otp.toString().trim()) {
+    return ApiResponse.error(res, "Invalid delivery OTP. Please check with customer.", 400);
+  }
+
+  order.status = "DELIVERED";
+  if (order.payment_method === "COD") {
+    order.payment_status = "PAID";
+    order.is_paid = true;
+  }
+  await order.save();
+
+  return ApiResponse.success(res, order, "Delivery OTP verified and order marked as DELIVERED successfully!");
+});
+

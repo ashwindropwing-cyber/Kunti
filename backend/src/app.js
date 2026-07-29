@@ -145,6 +145,7 @@ app.use("/api/payment", paymentRoutes);
 app.use("/api/webhook", webhookRoutes);
 app.use("/api/profile", require("./routes/profileRoutes"));
 app.use("/api/platform", platformRoutes);
+app.use("/api/upload", platformRoutes);
 app.use("/api/wishlist", require("./routes/wishlistRoutes"));
 app.use("/api/coupons", require("./routes/couponRoutes"));
 app.use(require("./middlewares/errorHandler"));

@@ -132,4 +132,12 @@ router.delete(
   adminController.deleteReviewByAdmin
 );
 
+// PUSH NOTIFICATIONS BROADCAST (ADMIN)
+router.post(
+  "/notifications/broadcast",
+  verifyToken,
+  allowRoles("ADMIN"),
+  adminController.broadcastNotification
+);
+
 module.exports = router;

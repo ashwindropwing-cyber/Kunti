@@ -45,4 +45,11 @@ router.get(
   riderController.getRiderReviews
 );
 
+router.get(
+  "/notifications",
+  verifyToken,
+  allowRoles("RIDER"),
+  riderController.getRiderNotifications
+);
+
 module.exports = router;

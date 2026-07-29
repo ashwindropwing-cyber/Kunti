@@ -21,6 +21,6 @@ router.get("/reports/payments", ...ADMIN_ONLY, platformController.getPaymentRepo
 
 
 // ── Generic Upload ───────────────────────────────────────────────────────────
-router.post("/upload", verifyToken, uploadLimiter, upload.single("file"), platformController.uploadImage);
+router.post("/upload", verifyToken, uploadLimiter, upload.any(), platformController.uploadImage);
 
 module.exports = router;

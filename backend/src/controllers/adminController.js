@@ -20,17 +20,27 @@ exports.getDashboardMetrics = asyncHandler(async (req, res) => {
     totalOrders,
     totalProducts,
     pendingRiders,
-    todayOrders,
+    todayOrdersCount,
     deliveredOrders,
+    todayOrdersList,
   ] = await Promise.all([
-    User.count(),
+    User.count({ where: { role: "CUSTOMER" } }),
     Rider.count(),
     MasterOrder.count(),
     Product.count(),
     Rider.count({ where: { is_verified: false } }),
     MasterOrder.count({ where: { createdAt: { [Op.gte]: today } } }),
     MasterOrder.count({ where: { status: "DELIVERED" } }),
+    MasterOrder.findAll({
+      where: {
+        createdAt: { [Op.gte]: today },
+        status: { [Op.ne]: "CANCELLED" },
+      },
+    }),
   ]);
+
+  const todayRevenue = todayOrdersList.reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
+  const avgOrderValue = todayOrdersList.length > 0 ? (todayRevenue / todayOrdersList.length) : 0;
 
   return ApiResponse.success(res, {
     overview: {
@@ -38,9 +48,17 @@ exports.getDashboardMetrics = asyncHandler(async (req, res) => {
       riders: totalRiders,
       orders: totalOrders,
       products: totalProducts,
-      today_orders: todayOrders,
+      today_orders: todayOrdersCount,
       delivered_orders: deliveredOrders,
+      todayRevenue: parseFloat(todayRevenue.toFixed(2)),
+      totalOrdersToday: todayOrdersCount,
+      avgOrderValue: parseFloat(avgOrderValue.toFixed(2)),
+      activeCustomersCount: totalUsers,
     },
+    todayRevenue: parseFloat(todayRevenue.toFixed(2)),
+    totalOrdersToday: todayOrdersCount,
+    avgOrderValue: parseFloat(avgOrderValue.toFixed(2)),
+    activeCustomersCount: totalUsers,
     pending_approvals: {
       total: pendingRiders,
       riders: pendingRiders,
@@ -661,4 +679,24 @@ exports.rejectRiderProfileUpdate = asyncHandler(async (req, res) => {
   }
 
   return ApiResponse.success(res, rider, "Rider profile update rejected");
+});
+
+// ── BROADCAST PUSH NOTIFICATION (ADMIN) ──────────────────────────────────────
+exports.broadcastNotification = asyncHandler(async (req, res) => {
+  const { title, message, targetAudience, target_audience } = req.body;
+  const audience = (targetAudience || target_audience || "ALL").toUpperCase();
+
+  if (!title || !message) {
+    return ApiResponse.error(res, "Title and message are required", 400);
+  }
+
+  const Notification = require("../models/notification");
+  const notification = await Notification.create({
+    title,
+    message,
+    target_audience: audience,
+    sent_by: req.user.id,
+  });
+
+  return ApiResponse.success(res, notification, "Notification broadcasted successfully", 201);
 });

@@ -100,6 +100,10 @@ const MasterOrder = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false, // true after admin confirms cash collected from rider
     },
+    delivery_otp: {
+      type: DataTypes.STRING(4),
+      allowNull: true,
+    },
   },
   {
     tableName: "master_orders",

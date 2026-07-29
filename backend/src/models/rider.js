@@ -41,6 +41,22 @@ const Rider = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    emergency_contact: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    bank_details: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
+    acceptance_rate: {
+      type: DataTypes.FLOAT,
+      defaultValue: 100.0,
+    },
+    completion_rate: {
+      type: DataTypes.FLOAT,
+      defaultValue: 100.0,
+    },
   },
   {
     tableName: "riders",

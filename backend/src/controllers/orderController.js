@@ -5,6 +5,7 @@ const asyncHandler = require("../utils/AsyncHandler");
 const { calculateRoadDistance } = require("../utils/geoUtils");
 const { getPlatformSettingsMap } = require("./platformController");
 const { validateCoupon } = require("./couponController");
+const { notifyAdmin, notifyRider } = require("../utils/fcmService");
 
 // Helper: Generate unique order number (e.g., KUNTI-100234)
 function generateOrderNumber() {
@@ -211,6 +212,12 @@ exports.createOrder = asyncHandler(async (req, res) => {
     include: [{ model: OrderItem, as: "items" }],
   });
 
+  notifyAdmin({
+    title: `New Order #${createdOrder.order_number || createdOrder.id}! 🍕`,
+    body: `New order placed for ₹${createdOrder.total_amount}. Tap to view in Admin app.`,
+    data: { order_id: createdOrder.id.toString(), type: "NEW_ORDER" },
+  });
+
   return ApiResponse.success(res, createdOrder, "Order placed successfully", 201);
 });
 
@@ -335,6 +342,12 @@ exports.assignRider = asyncHandler(async (req, res) => {
   order.status = "ASSIGNED";
   await order.save();
 
+  notifyRider(rider, {
+    title: "New Order Assigned 🛵",
+    body: `You have been assigned Order #${order.order_number || order.id}.`,
+    data: { order_id: order.id.toString(), type: "ORDER_ASSIGNED" },
+  });
+
   return ApiResponse.success(res, order, "Rider assigned successfully");
 });
 
@@ -375,6 +388,14 @@ exports.bulkAssignRider = asyncHandler(async (req, res) => {
     where: { id: { [Op.in]: order_ids } },
     include: [{ model: OrderItem, as: "items" }]
   });
+
+  for (const o of updatedOrders) {
+    notifyRider(rider, {
+      title: "New Order Assigned 🛵",
+      body: `You have been assigned Order #${o.order_number || o.id}.`,
+      data: { order_id: o.id.toString(), type: "ORDER_ASSIGNED" },
+    });
+  }
 
   return ApiResponse.success(
     res,
@@ -561,6 +582,14 @@ exports.riderUpdateOrderStatus = asyncHandler(async (req, res) => {
     order.is_paid = true;
   }
   await order.save();
+
+  if (status === "DELIVERED") {
+    notifyAdmin({
+      title: "Order Completed! ✅",
+      body: `Order #${order.order_number || order.id} has been delivered.`,
+      data: { order_id: order.id.toString(), type: "ORDER_DELIVERED" },
+    });
+  }
 
   return ApiResponse.success(res, order, `Order status updated to ${status}`);
 });

@@ -159,7 +159,7 @@ const { sequelize } = require("./models");
     console.log("SQL Database connected successfully ✅");
 
     // Sync database schema
-    await sequelize.sync({ alter: false });
+    await sequelize.sync({ alter: true });
     console.log("SQL Database schema synced ✅");
 
     // Seed default platform settings once on startup

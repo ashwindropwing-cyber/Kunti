@@ -13,6 +13,14 @@ const Banner = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    subtitle: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    target_category: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     image_url: {
       type: DataTypes.STRING,
       allowNull: false,

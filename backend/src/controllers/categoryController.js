@@ -7,16 +7,20 @@ const { optimizeCloudinaryUrl, CLOUDINARY_TRANSFORMATIONS } = require("../utils/
 // ======================================
 exports.addCategory = async (req, res) => {
   try {
-
-    const { name } = req.body;
+    const { name, description, display_order, is_active } = req.body;
 
     if (!name) {
       return res.status(400).json({ message: "Category name required" });
     }
 
+    const imagePath = req.file ? req.file.path : null;
+
     const category = await Category.create({
       name,
-      banner_image: req.file ? req.file.path : null
+      description: description || null,
+      display_order: display_order !== undefined ? parseInt(display_order) : 0,
+      is_active: is_active !== undefined ? (is_active === true || is_active === "true") : true,
+      image_url: imagePath
     });
 
     // clear cache when category changes
@@ -52,14 +56,15 @@ exports.getCategories = async (req, res) => {
     // fetch from database
     const categories = await Category.findAll({
       where: whereCondition,
-      order: [["createdAt", "DESC"]],
+      order: [["display_order", "ASC"], ["createdAt", "DESC"]],
     });
 
     const formattedCategories = categories.map(cat => {
       const data = cat.toJSON ? cat.toJSON() : { ...cat };
-      if (data.banner_image) {
-        data.banner_image = optimizeCloudinaryUrl(data.banner_image, CLOUDINARY_TRANSFORMATIONS.CATEGORY);
+      if (data.image_url) {
+        data.image_url = optimizeCloudinaryUrl(data.image_url, CLOUDINARY_TRANSFORMATIONS.CATEGORY);
       }
+      data.banner_image = data.image_url; // Backward compatibility alias
       return data;
     });
 
@@ -86,14 +91,17 @@ exports.getCategories = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, is_active } = req.body;
+    const { name, description, display_order, is_active } = req.body;
 
     const category = await Category.findByPk(id);
     if (!category) {
       return res.status(404).json({ message: "Category not found" });
     }
 
-    if (name) category.name = name;
+    if (name !== undefined) category.name = name;
+    if (description !== undefined) category.description = description;
+    if (display_order !== undefined) category.display_order = parseInt(display_order);
+
     // Parse is_active from FormData string to boolean
     if (is_active !== undefined && is_active !== null) {
       if (typeof is_active === "string") {
@@ -102,7 +110,7 @@ exports.updateCategory = async (req, res) => {
         category.is_active = Boolean(is_active);
       }
     }
-    if (req.file) category.banner_image = req.file.path;
+    if (req.file) category.image_url = req.file.path;
 
     await category.save();
     // Clear both cache keys

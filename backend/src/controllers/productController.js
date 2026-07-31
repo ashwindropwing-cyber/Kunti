@@ -75,22 +75,32 @@ exports.getAdminAllProducts = asyncHandler(async (req, res) => {
   }, {});
 
   const formatted = rows.map((p) => {
-    const discount = p.mrp > p.selling_price ? Math.round(((p.mrp - p.selling_price) / p.mrp) * 100) : 0;
+    const originalPrice = p.price;
+    const discPrice = p.discount_price || p.price;
+    const discount = originalPrice > discPrice ? Math.round(((originalPrice - discPrice) / originalPrice) * 100) : 0;
     const cat = categoryMap[p.category_id];
 
     return {
+      id: p.id,
       product_id: p.id,
       name: p.name,
       description: p.description,
       category_id: p.category_id,
       Category: cat ? { id: cat.id, name: cat.name } : null,
       category_name: cat ? cat.name : "",
-      mrp: p.mrp,
-      selling_price: p.selling_price,
+      price: p.price,
+      discount_price: p.discount_price,
+      mrp: p.price,
+      selling_price: discPrice,
       discount_percent: discount,
-      quantity: p.quantity,
+      stock_quantity: p.stock_quantity,
+      quantity: p.stock_quantity,
       image_url: p.image_url,
-      is_active: p.is_active,
+      is_veg: p.is_veg,
+      food_type: p.food_type || (p.is_veg ? "veg" : "nonVeg"),
+      is_bestseller: p.is_bestseller || false,
+      is_available: p.is_available,
+      is_active: p.is_available,
       rating: p.rating,
       rating_count: p.rating_count
     };
@@ -103,22 +113,42 @@ exports.getAdminAllProducts = asyncHandler(async (req, res) => {
  */
 exports.adminCreateProduct = async (req, res) => {
   try {
-    const { name, description, mrp, selling_price, quantity, category_id, rating } = req.body;
+    const {
+      name, description, category_id,
+      price, mrp,
+      discount_price, selling_price,
+      stock_quantity, quantity,
+      is_available, is_active,
+      is_veg, food_type, is_bestseller, rating
+    } = req.body;
 
-    if (!name || !mrp || !selling_price || !category_id) {
-      return res.status(400).json({ message: "Missing required fields" });
+    const finalPrice = parseFloat(price !== undefined ? price : mrp);
+    const finalDiscountPrice = (discount_price !== undefined || selling_price !== undefined) 
+      ? parseFloat(discount_price !== undefined ? discount_price : selling_price) 
+      : null;
+    const finalCategory = category_id;
+
+    if (!name || isNaN(finalPrice) || !finalCategory) {
+      return res.status(400).json({ message: "Missing required fields (name, price, category_id)" });
     }
 
+    const isVegVal = is_veg !== undefined 
+      ? (is_veg === true || is_veg === "true") 
+      : (food_type ? food_type === "veg" : true);
+
     const product = await Product.create({
-      category_id,
+      category_id: finalCategory,
       name,
-      description,
-      mrp,
-      selling_price,
-      quantity: quantity || 0,
+      description: description || "",
+      price: finalPrice,
+      discount_price: finalDiscountPrice,
+      stock_quantity: stock_quantity !== undefined ? parseInt(stock_quantity) : (quantity !== undefined ? parseInt(quantity) : 100),
       image_url: req.file ? req.file.path : null,
-      is_active: true,
-      rating: rating || 0,
+      is_veg: isVegVal,
+      food_type: food_type || (isVegVal ? "veg" : "nonVeg"),
+      is_bestseller: is_bestseller === true || is_bestseller === "true",
+      is_available: is_available !== undefined ? (is_available === true || is_available === "true") : (is_active !== undefined ? (is_active === true || is_active === "true") : true),
+      rating: rating ? parseFloat(rating) : 0,
     });
 
     await clearProductCaches(product.id);
@@ -138,16 +168,40 @@ exports.adminUpdateProduct = async (req, res) => {
     const product = await Product.findByPk(id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    const { name, description, mrp, selling_price, quantity, category_id, is_active, rating } = req.body;
+    const {
+      name, description, category_id,
+      price, mrp,
+      discount_price, selling_price,
+      stock_quantity, quantity,
+      is_available, is_active,
+      is_veg, food_type, is_bestseller, rating
+    } = req.body;
 
     if (name !== undefined) product.name = name;
     if (description !== undefined) product.description = description;
-    if (mrp !== undefined) product.mrp = mrp;
-    if (selling_price !== undefined) product.selling_price = selling_price;
-    if (quantity !== undefined) product.quantity = quantity;
     if (category_id !== undefined) product.category_id = category_id;
-    if (is_active !== undefined) product.is_active = is_active;
-    if (rating !== undefined) product.rating = rating;
+    if (price !== undefined) product.price = parseFloat(price);
+    else if (mrp !== undefined) product.price = parseFloat(mrp);
+
+    if (discount_price !== undefined) product.discount_price = parseFloat(discount_price);
+    else if (selling_price !== undefined) product.discount_price = parseFloat(selling_price);
+
+    if (stock_quantity !== undefined) product.stock_quantity = parseInt(stock_quantity);
+    else if (quantity !== undefined) product.stock_quantity = parseInt(quantity);
+
+    if (is_available !== undefined) product.is_available = is_available === true || is_available === "true";
+    else if (is_active !== undefined) product.is_available = is_active === true || is_active === "true";
+
+    if (food_type !== undefined) {
+      product.food_type = food_type;
+      product.is_veg = food_type === "veg";
+    } else if (is_veg !== undefined) {
+      product.is_veg = is_veg === true || is_veg === "true";
+      product.food_type = product.is_veg ? "veg" : "nonVeg";
+    }
+
+    if (is_bestseller !== undefined) product.is_bestseller = is_bestseller === true || is_bestseller === "true";
+    if (rating !== undefined) product.rating = parseFloat(rating);
     if (req.file) product.image_url = req.file.path;
 
     await product.save();

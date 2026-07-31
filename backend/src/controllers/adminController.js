@@ -67,7 +67,14 @@ exports.getDashboardMetrics = asyncHandler(async (req, res) => {
 });
 
 exports.createRiderByAdmin = asyncHandler(async (req, res) => {
-  const { name, phone, cod_limit } = req.body;
+  const {
+    name, phone, email, address,
+    vehicle_type, vehicle_number,
+    license_number, dl_number,
+    aadhar_number, date_of_birth,
+    delivery_radius_km, profile_picture_url, avatar_url,
+    cod_limit
+  } = req.body;
 
   if (!name || !phone) {
     return ApiResponse.error(res, "Name and phone are required", 400);
@@ -78,20 +85,36 @@ exports.createRiderByAdmin = asyncHandler(async (req, res) => {
   });
 
   if (existingUser) {
-    return ApiResponse.error(res, "User already exists", 400);
+    return ApiResponse.error(res, "User with this phone number already exists", 400);
   }
 
-  const user = await User.create({ name, phone, role: "RIDER" });
+  const user = await User.create({
+    name,
+    phone,
+    email: email || null,
+    role: "RIDER"
+  });
 
   const rider = await Rider.create({
     user_id: user.id,
-    cod_limit: cod_limit || 0,
+    vehicle_type: vehicle_type || "Bike",
+    vehicle_number: vehicle_number || "",
+    address: address || "",
+    license_number: license_number || dl_number || "",
+    aadhar_number: aadhar_number || "",
+    date_of_birth: date_of_birth || "",
+    delivery_radius_km: delivery_radius_km ? parseFloat(delivery_radius_km) : 5.0,
+    profile_picture_url: profile_picture_url || avatar_url || "",
+    cod_limit: cod_limit ? parseFloat(cod_limit) : 0,
+    is_verified: true,
     is_available: true,
   });
 
   return ApiResponse.success(res, {
     rider_id: rider.id,
     user_id: user.id,
+    rider,
+    user,
   }, "Rider created successfully", 201);
 });
 
@@ -135,16 +158,24 @@ exports.getAllRiders = asyncHandler(async (req, res) => {
       }
     });
 
+    const riderJson = r.toJSON ? r.toJSON() : { ...r };
+
     return {
-      ...r,
+      ...riderJson,
       id: r.id,
       user_id: r.user_id,
-      name: user?.name,
-      phone: user?.phone,
-      email: user?.email,
+      name: user?.name || "",
+      phone: user?.phone || "",
+      email: user?.email || "",
+      avatar_url: r.profile_picture_url || "",
+      dl_number: r.license_number || "",
       cod_limit: r.cod_limit,
       is_available: r.is_available,
       is_verified: r.is_verified,
+      vehicle_type: r.vehicle_type,
+      vehicle_number: r.vehicle_number,
+      rating: r.rating,
+      rating_count: r.rating_count,
       current_lat: r.current_lat,
       current_lng: r.current_lng,
       createdAt: r.createdAt,

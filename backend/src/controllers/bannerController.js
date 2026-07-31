@@ -22,7 +22,6 @@ exports.getActiveBanners = asyncHandler(async (req, res) => {
   const banners = await Banner.findAll({
     where: { is_active: true },
     order: [["display_order", "ASC"], ["createdAt", "ASC"]],
-    attributes: ["id", "image_url", "title", "redirect_url", "display_order"],
   });
 
   const formattedBanners = banners.map(b => {
@@ -30,6 +29,7 @@ exports.getActiveBanners = asyncHandler(async (req, res) => {
     if (data.image_url) {
       data.image_url = optimizeCloudinaryUrl(data.image_url, CLOUDINARY_TRANSFORMATIONS.BANNER);
     }
+    data.priority = data.display_order;
     return data;
   });
 
@@ -41,18 +41,29 @@ exports.getAllBannersAdmin = asyncHandler(async (req, res) => {
   const banners = await Banner.findAll({
     order: [["display_order", "ASC"], ["createdAt", "DESC"]],
   });
-  return ApiResponse.success(res, banners);
+
+  const formattedBanners = banners.map(b => {
+    const data = b.toJSON ? b.toJSON() : { ...b };
+    data.priority = data.display_order;
+    return data;
+  });
+
+  return ApiResponse.success(res, formattedBanners);
 });
 
 exports.addBanner = asyncHandler(async (req, res) => {
-  const { title, redirect_url, display_order } = req.body;
+  const { title, subtitle, target_category, redirect_url, display_order, priority } = req.body;
   if (!req.file) return ApiResponse.error(res, "Banner image is required", 400);
+
+  const orderVal = priority !== undefined ? Number(priority) : (display_order !== undefined ? Number(display_order) : 0);
 
   const banner = await Banner.create({
     image_url: req.file.path,
     title: title || null,
+    subtitle: subtitle || null,
+    target_category: target_category || null,
     redirect_url: redirect_url || null,
-    display_order: display_order != null ? Number(display_order) : 0,
+    display_order: orderVal,
     is_active: true,
   });
 
@@ -64,12 +75,16 @@ exports.updateBanner = asyncHandler(async (req, res) => {
   const banner = await Banner.findByPk(req.params.id);
   if (!banner) return ApiResponse.error(res, "Banner not found", 404);
 
-  const { title, redirect_url, display_order, is_active } = req.body;
+  const { title, subtitle, target_category, redirect_url, display_order, priority, is_active } = req.body;
 
   if (title !== undefined) banner.title = title;
+  if (subtitle !== undefined) banner.subtitle = subtitle;
+  if (target_category !== undefined) banner.target_category = target_category;
   if (redirect_url !== undefined) banner.redirect_url = redirect_url;
-  if (display_order !== undefined) banner.display_order = Number(display_order);
-  if (is_active !== undefined) banner.is_active = is_active;
+  if (priority !== undefined) banner.display_order = Number(priority);
+  else if (display_order !== undefined) banner.display_order = Number(display_order);
+
+  if (is_active !== undefined) banner.is_active = is_active === true || is_active === "true";
   if (req.file) banner.image_url = req.file.path;
 
   await banner.save();

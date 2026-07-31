@@ -37,6 +37,14 @@ const Product = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: true,
     },
+    food_type: {
+      type: DataTypes.STRING,
+      defaultValue: "veg", // 'veg', 'nonVeg', 'egg'
+    },
+    is_bestseller: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
     is_available: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,

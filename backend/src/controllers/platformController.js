@@ -50,7 +50,7 @@ const DEFAULT_SETTINGS = [
     },
     {
         key: "shop_name",
-        value: "Kunti Kolkata Rolls",
+        value: "Kunti Ke Ande Ka Funda",
         type: "string",
         description: "Restaurant name",
     },

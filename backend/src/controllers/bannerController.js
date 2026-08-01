@@ -52,13 +52,14 @@ exports.getAllBannersAdmin = asyncHandler(async (req, res) => {
 });
 
 exports.addBanner = asyncHandler(async (req, res) => {
-  const { title, subtitle, target_category, redirect_url, display_order, priority } = req.body;
-  if (!req.file) return ApiResponse.error(res, "Banner image is required", 400);
+  const { title, subtitle, target_category, redirect_url, display_order, priority, image_url, imageUrl } = req.body;
+  const bannerImg = req.file ? req.file.path : (image_url || imageUrl);
+  if (!bannerImg) return ApiResponse.error(res, "Banner image is required", 400);
 
   const orderVal = priority !== undefined ? Number(priority) : (display_order !== undefined ? Number(display_order) : 0);
 
   const banner = await Banner.create({
-    image_url: req.file.path,
+    image_url: bannerImg,
     title: title || null,
     subtitle: subtitle || null,
     target_category: target_category || null,

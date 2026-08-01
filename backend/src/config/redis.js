@@ -4,11 +4,10 @@ const client = redis.createClient({
   url: process.env.REDIS_URL,
   socket: {
     reconnectStrategy: (retries) => {
-      if (retries > 10) {
-        console.error("Redis: max reconnect attempts reached. Giving up.");
-        return new Error("Max reconnect attempts reached");
+      if (retries > 1) {
+        return false; // Stop reconnecting if Redis is not available locally
       }
-      return Math.min(retries * 200, 3000);
+      return 500;
     },
     connectTimeout: 5000,
   }

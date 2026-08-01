@@ -464,3 +464,135 @@ exports.resetPassword = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, null, "Password reset successful");
 });
+
+/**
+ * ADMIN LOGIN (by Email or Phone + Password)
+ */
+exports.adminLogin = asyncHandler(async (req, res) => {
+  let { email, phone, password } = req.body;
+  email = email?.toString().trim();
+  phone = phone?.toString().trim();
+
+  if ((!email && !phone) || !password) {
+    return ApiResponse.error(res, "Email/phone and password required", 400);
+  }
+
+  const whereClause = email ? { email } : { phone };
+  const user = await User.findOne({ where: whereClause });
+
+  if (!user || user.role !== "ADMIN") {
+    return ApiResponse.error(res, "Invalid admin credentials", 401);
+  }
+
+  const match = await bcrypt.compare(password, user.password);
+  if (!match) {
+    return ApiResponse.error(res, "Invalid admin credentials", 401);
+  }
+
+  const token = jwt.sign(
+    { id: user.id, role: "ADMIN" },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  return ApiResponse.success(res, {
+    token,
+    role: "ADMIN",
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+    },
+  }, "Admin login successful");
+});
+
+/**
+ * UNIFIED SEND OTP (Rider / Customer / Seller)
+ */
+exports.sendOTP = asyncHandler(async (req, res) => {
+  let { phone } = req.body;
+  phone = phone?.toString().trim();
+  if (!phone) return ApiResponse.error(res, "Phone number required", 400);
+
+  const otpCode = process.env.NODE_ENV !== "production" ? "123456" : generateOTP();
+
+  await OTP.destroy({ where: { phone } });
+  await OTP.create({
+    phone,
+    otp: otpCode,
+    attempts: 0,
+    expires_at: new Date(Date.now() + 10 * 60 * 1000),
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[AUTH] Unified OTP for ${phone}: ${otpCode}`);
+  }
+
+  // Never return OTP in response body in production
+  const responseData = process.env.NODE_ENV !== "production" ? { otp: otpCode } : null;
+  return ApiResponse.success(res, responseData, "OTP sent successfully");
+});
+
+/**
+ * UNIFIED VERIFY OTP
+ */
+exports.verifyOTP = asyncHandler(async (req, res) => {
+  let { phone, otp } = req.body;
+  phone = phone?.toString().trim();
+  otp = otp?.toString().trim();
+
+  if (!phone || !otp) return ApiResponse.error(res, "Phone and OTP required", 400);
+
+  const record = await OTP.findOne({ where: { phone } });
+  if (!record || record.otp !== otp) {
+    // Allow master test OTP in non-prod only
+    if (process.env.NODE_ENV !== "production" && otp === "123456") {
+      // Pass — dev/test bypass
+    } else {
+      return ApiResponse.error(res, "Invalid or expired OTP", 400);
+    }
+  }
+
+  // Check OTP expiry
+  if (record && record.expires_at < new Date()) {
+    return ApiResponse.error(res, "OTP has expired", 400);
+  }
+
+  // Check attempt limit
+  if (record && record.attempts >= 5) {
+    return ApiResponse.error(res, "Too many incorrect attempts", 429);
+  }
+
+  let user = await User.findOne({ where: { phone } });
+  if (!user) {
+    // SECURITY: Auto-created users are always CUSTOMER — never allow role escalation
+    const safeRole = "CUSTOMER";
+    user = await User.create({
+      phone,
+      name: `User_${phone.slice(-4)}`,
+      role: safeRole
+    });
+  }
+
+  // Clean up OTP after successful verification
+  await OTP.destroy({ where: { phone } });
+
+  const token = jwt.sign(
+    { id: user.id, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  return ApiResponse.success(res, {
+    token,
+    role: user.role,
+    user: {
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      role: user.role
+    }
+  }, "OTP verified successfully");
+});

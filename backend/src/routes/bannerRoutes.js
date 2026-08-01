@@ -8,10 +8,9 @@ const { uploadLimiter } = require("../middlewares/rateLimiter");
 
 
 // ── CUSTOMER / SELLER — get all active banners ─────────────────
-// GET /api/banners
+// GET /api/banners (public)
 router.get(
   "/",
-  verifyToken,
   bannerController.getActiveBanners
 );
 
@@ -25,7 +24,15 @@ router.get(
 );
 
 // ── ADMIN — add a new banner with image ───────────────────────
-// POST /api/banners/add   (multipart: field name "banner")
+// POST /api/banners/add or POST /api/banners
+router.post(
+  "/",
+  verifyToken,
+  allowRoles("ADMIN"),
+  uploadLimiter,
+  upload.single("banner"),
+  bannerController.addBanner
+);
 router.post(
   "/add",
   verifyToken,

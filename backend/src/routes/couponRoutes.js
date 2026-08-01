@@ -4,6 +4,20 @@ const couponController = require("../controllers/couponController");
 const { verifyToken, allowRoles } = require("../middlewares/authMiddleware");
 
 // ─── ADMIN ROUTES ──────────────────────────────────────────────────────────
+router.get(
+  "/",
+  verifyToken,
+  allowRoles("ADMIN"),
+  couponController.getAllCoupons
+);
+
+router.post(
+  "/",
+  verifyToken,
+  allowRoles("ADMIN"),
+  couponController.createCoupon
+);
+
 router.post(
   "/admin",
   verifyToken,

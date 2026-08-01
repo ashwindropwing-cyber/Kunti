@@ -86,15 +86,21 @@ exports.createCoupon = asyncHandler(async (req, res) => {
     description,
     discount_type,
     discount_value,
+    discountPercent,
+    discountAmount,
     max_discount_amount,
+    maxDiscount,
     min_order_amount,
+    minOrderValue,
     usage_limit_per_user,
     total_usage_limit,
     start_date,
     end_date,
   } = req.body;
 
-  if (!code || !discount_value) {
+  const actualDiscountVal = discount_value !== undefined ? discount_value : (discountPercent !== undefined ? discountPercent : discountAmount);
+
+  if (!code || actualDiscountVal === undefined || actualDiscountVal === null) {
     return ApiResponse.error(res, "Code and discount_value are required", 400);
   }
 
@@ -109,9 +115,9 @@ exports.createCoupon = asyncHandler(async (req, res) => {
     code,
     description: description || null,
     discount_type: discount_type === "FIXED" ? "FIXED" : "PERCENTAGE",
-    discount_value: parseFloat(discount_value),
-    max_discount_amount: max_discount_amount ? parseFloat(max_discount_amount) : 0,
-    min_order_amount: min_order_amount ? parseFloat(min_order_amount) : 0,
+    discount_value: parseFloat(actualDiscountVal),
+    max_discount_amount: (max_discount_amount || maxDiscount) ? parseFloat(max_discount_amount || maxDiscount) : 0,
+    min_order_amount: (min_order_amount || minOrderValue) ? parseFloat(min_order_amount || minOrderValue) : 0,
     usage_limit_per_user: usage_limit_per_user ? parseInt(usage_limit_per_user) : 1,
     total_usage_limit: total_usage_limit ? parseInt(total_usage_limit) : 1000,
     start_date: start_date ? new Date(start_date) : null,

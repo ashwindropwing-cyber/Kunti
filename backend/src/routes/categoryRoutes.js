@@ -6,6 +6,14 @@ const { verifyToken, allowRoles } = require("../middlewares/authMiddleware");
 const { uploadLimiter } = require("../middlewares/rateLimiter");
 
 router.post(
+  "/",
+  verifyToken,
+  allowRoles("ADMIN"),
+  uploadLimiter,
+  upload.single("banner"),
+  categoryController.addCategory
+);
+router.post(
   "/add",
   verifyToken,
   allowRoles("ADMIN"),
@@ -29,12 +37,10 @@ router.delete(
 );
 router.get(
   "/",
-  verifyToken,
   categoryController.getCategories
 );
 router.get(
   "/name/:name",
-  verifyToken,
   categoryController.getCategoryIdByName
 );
 module.exports = router;

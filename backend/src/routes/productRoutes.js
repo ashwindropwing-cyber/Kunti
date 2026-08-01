@@ -8,8 +8,21 @@ const {
 } = require("../middlewares/authMiddleware");
 const { uploadLimiter } = require("../middlewares/rateLimiter");
 
+// Public/All Products
+router.get("/", productController.getAdminAllProducts);
+
 // Admin: List all
 router.get("/admin/all", verifyToken, allowRoles("ADMIN"), productController.getAdminAllProducts);
+
+// Admin: Create product
+router.post(
+  "/",
+  verifyToken,
+  allowRoles("ADMIN"),
+  uploadLimiter,
+  upload.single("image"),
+  productController.adminCreateProduct
+);
 
 // Admin: Create product
 router.post(

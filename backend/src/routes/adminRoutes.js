@@ -8,6 +8,9 @@ const {
 const { heavyReadLimiter, uploadLimiter } = require("../middlewares/rateLimiter");
 const { cacheFor } = require("../middlewares/responseCache");
 
+const platformController = require("../controllers/platformController");
+const orderController = require("../controllers/orderController");
+
 // Get real-time admin dashboard metrics
 router.get(
   "/dashboard-metrics",
@@ -15,6 +18,34 @@ router.get(
   allowRoles("ADMIN"),
   cacheFor(30),
   adminController.getDashboardMetrics
+);
+
+router.get(
+  "/dashboard",
+  verifyToken,
+  allowRoles("ADMIN"),
+  adminController.getDashboardMetrics
+);
+
+router.get(
+  "/store-settings",
+  verifyToken,
+  allowRoles("ADMIN"),
+  platformController.getAllSettings
+);
+
+router.get(
+  "/customers",
+  verifyToken,
+  allowRoles("ADMIN"),
+  adminController.getAllUsers
+);
+
+router.get(
+  "/orders",
+  verifyToken,
+  allowRoles("ADMIN"),
+  orderController.getAllOrders
 );
 
 // RIDERS MANAGEMENT (ADMIN)

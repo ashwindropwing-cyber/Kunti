@@ -245,6 +245,9 @@ exports.updateAvailability = async (req, res) => {
       return res.status(404).json({ message: "Rider profile not found" });
     }
 
+    const lat = current_lat !== undefined ? current_lat : req.body.latitude;
+    const lng = current_lng !== undefined ? current_lng : req.body.longitude;
+
     rider.is_available = is_available;
 
     if (is_available === true) {
@@ -253,13 +256,13 @@ exports.updateAvailability = async (req, res) => {
           message: "Verification required. Please complete your KYC and wait for admin approval.",
         });
       }
-      if (current_lat === undefined || current_lng === undefined) {
+      if (lat === undefined || lng === undefined) {
         return res.status(400).json({
           message: "Latitude and Longitude required when going online",
         });
       }
-      rider.current_lat = current_lat;
-      rider.current_lng = current_lng;
+      rider.current_lat = lat;
+      rider.current_lng = lng;
     }
 
     await rider.save();

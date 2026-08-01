@@ -56,7 +56,7 @@ exports.getAdminAllProducts = asyncHandler(async (req, res) => {
   const { count, rows } = await Product.findAndCountAll({
     where: whereCondition,
     include: [
-      { model: Category, attributes: ["id", "name"] }
+      { model: Category, as: "category", attributes: ["id", "name"] }
     ],
     order: [["createdAt", "DESC"]],
     limit: parseInt(limit),

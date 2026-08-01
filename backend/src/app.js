@@ -46,7 +46,9 @@ app.set("trust proxy", 1);
 
 const allowedOrigins = [
   "https://tind-admin.dropwinggroups.com",
-  "https://tind.dropwinggroups.com"
+  "https://tind.dropwinggroups.com",
+  "http://kunti.dropwinggroups.com",
+  "https://kunti.dropwinggroups.com"
 ];
 
 app.use(cors({
@@ -153,13 +155,13 @@ app.use(require("./middlewares/errorHandler"));
 
 const { sequelize } = require("./models");
 
-(async () => {
+const initDb = async () => {
   try {
     await sequelize.authenticate();
     console.log("SQL Database connected successfully ✅");
 
     // Sync database schema
-    await sequelize.sync({ alter: true });
+    await sequelize.sync();
     console.log("SQL Database schema synced ✅");
 
     // Seed default platform settings once on startup
@@ -176,7 +178,12 @@ const { sequelize } = require("./models");
   } catch (error) {
     console.error("SQL Database connection FAILED ❌", error.message);
   }
-})();
+};
+
+app.initDb = initDb;
+if (process.env.NODE_ENV !== "test") {
+  initDb();
+}
 
 app.use("/api/*", (req, res) => {
   res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });

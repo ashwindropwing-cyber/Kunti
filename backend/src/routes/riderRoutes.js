@@ -45,6 +45,50 @@ router.get(
   riderController.getRiderReviews
 );
 
+const orderController = require("../controllers/orderController");
+
+router.get(
+  "/profile",
+  verifyToken,
+  allowRoles("RIDER"),
+  riderController.getDashboard
+);
+
+router.post(
+  "/toggle-status",
+  verifyToken,
+  allowRoles("RIDER"),
+  riderController.updateAvailability
+);
+
+router.get(
+  "/available-orders",
+  verifyToken,
+  allowRoles("RIDER"),
+  orderController.getRiderOrders
+);
+
+router.get(
+  "/active-orders",
+  verifyToken,
+  allowRoles("RIDER"),
+  orderController.getRiderOrders
+);
+
+router.get(
+  "/earnings",
+  verifyToken,
+  allowRoles("RIDER"),
+  riderController.getDashboard
+);
+
+router.get(
+  "/history",
+  verifyToken,
+  allowRoles("RIDER"),
+  orderController.getRiderOrders
+);
+
 router.get(
   "/notifications",
   verifyToken,

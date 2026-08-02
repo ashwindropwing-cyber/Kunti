@@ -13,7 +13,7 @@ const client = redis.createClient({
   }
 });
 
-let isRedisReady = false;
+let hasLoggedRedisError = false;
 
 client.on("ready", () => {
   isRedisReady = true;
@@ -22,17 +22,24 @@ client.on("ready", () => {
 
 client.on("error", (err) => {
   isRedisReady = false;
-  console.error("Redis error:", err.message);
+  if (!hasLoggedRedisError) {
+    console.warn("Redis unavailable (running without Redis cache):", err.message);
+    hasLoggedRedisError = true;
+  }
 });
 
 client.on("end", () => {
   isRedisReady = false;
-  console.warn("Redis connection closed");
 });
 
-client.connect().catch((err) => {
-  console.error("Redis initial connect failed:", err.message);
-});
+if (process.env.REDIS_URL || process.env.ENABLE_REDIS === "true") {
+  client.connect().catch((err) => {
+    if (!hasLoggedRedisError) {
+      console.warn("Redis initial connect failed:", err.message);
+      hasLoggedRedisError = true;
+    }
+  });
+}
 
 // Safe wrapper: returns null on failure instead of throwing
 const safeClient = new Proxy(client, {

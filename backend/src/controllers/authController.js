@@ -477,7 +477,16 @@ exports.adminLogin = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Email/phone and password required", 400);
   }
 
-  const whereClause = email ? { email } : { phone };
+  const { Op } = require("sequelize");
+  const whereClause = email
+    ? {
+        [Op.or]: [
+          { email: email },
+          { email: `${email}@dropwinggroups.com` },
+          { phone: email }
+        ]
+      }
+    : { phone };
   const user = await User.findOne({ where: whereClause });
 
   if (!user || user.role !== "ADMIN") {

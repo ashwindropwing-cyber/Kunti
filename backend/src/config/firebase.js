@@ -16,7 +16,9 @@ if (firebaseServiceAccountRaw) {
 
     const serviceAccount = JSON.parse(cleanJson);
     if (serviceAccount.private_key) {
-      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      serviceAccount.private_key = serviceAccount.private_key
+        .replace(/\\n/g, "\n")
+        .replace(/\n\n/g, "\n");
     }
 
     if (!admin.apps.length) {

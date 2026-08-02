@@ -2,6 +2,7 @@ require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") }
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
 const helmet = require("helmet");
 const hpp = require("hpp");
 const crypto = require("crypto");
@@ -35,7 +36,10 @@ const paymentRoutes = require("./routes/paymentRoutes");
 
 // ─── Static Files ────────────────────────────────────────────────────
 app.use("/uploads", express.static("uploads"));
-app.use(express.static(path.join(__dirname, "../dist")));
+const distDirectory = path.join(__dirname, "../dist");
+if (fs.existsSync(distDirectory)) {
+  app.use(express.static(distDirectory));
+}
 
 // ─── Webhook raw body (MUST be before express.json()) ────────────────
 app.use("/api/payment/webhook", express.raw({ type: "application/json", limit: "1mb" }));
@@ -56,18 +60,17 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps, curl, postman)
     if (!origin) return callback(null, true);
     
-    // In development mode, allow localhost origins
-    if (process.env.NODE_ENV !== "production") {
-      if (origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")) {
-        return callback(null, true);
-      }
+    // Always allow localhost and 127.0.0.1 origins (for dev and Flutter web test)
+    if (origin.startsWith("http://localhost") || origin.startsWith("https://localhost") ||
+        origin.startsWith("http://127.0.0.1") || origin.startsWith("https://127.0.0.1")) {
+      return callback(null, true);
     }
     
     const normalizedOrigin = origin.replace(/\/$/, "");
-    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes("*")) {
+    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes("*") || normalizedOrigin.includes("dropwinggroups.com")) {
       return callback(null, true);
     } else {
-      return callback(new Error("Not allowed by CORS"));
+      return callback(new Error("Not allowed by CORS: " + origin));
     }
   },
   credentials: true,
@@ -198,7 +201,15 @@ app.get("*", (req, res, next) => {
   ) {
     return next();
   }
-  res.sendFile(path.join(__dirname, "../dist", "index.html"));
+  const distIndexPath = path.join(__dirname, "../dist", "index.html");
+  if (fs.existsSync(distIndexPath)) {
+    return res.sendFile(distIndexPath);
+  }
+  return res.json({
+    status: "OK",
+    service: "Kunti Backend API",
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ─── Debug/Test Routes (dev only) ────────────────────────────────────

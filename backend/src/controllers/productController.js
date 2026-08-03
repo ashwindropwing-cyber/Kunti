@@ -63,10 +63,10 @@ exports.getAdminAllProducts = asyncHandler(async (req, res) => {
     offset
   });
 
-  const categoryIds = [...new Set(rows.map(p => p.category_id))];
+  const categoryIds = [...new Set(rows.map(p => p.category_id).filter(Boolean))];
   let categories = [];
   if (categoryIds.length > 0) {
-    categories = await Category.findAll({ where: { id: { in: categoryIds } } });
+    categories = await Category.findAll({ where: { id: categoryIds } });
   }
 
   const categoryMap = categories.reduce((acc, cat) => {
@@ -301,7 +301,7 @@ exports.getProductReviews = asyncHandler(async (req, res) => {
   let users = [];
   if (userIds.length > 0) {
     users = await User.findAll({
-      where: { id: { in: userIds } }
+      where: { id: userIds }
     });
   }
   const userMap = users.reduce((acc, u) => {

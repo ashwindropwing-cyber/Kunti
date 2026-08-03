@@ -1,14 +1,18 @@
 require("dotenv").config();
 const { Sequelize } = require("sequelize");
 
+const dialect = process.env.DB_DIALECT || "mysql";
+const defaultPort = dialect === "mysql" || dialect === "mariadb" ? 3306 : 5432;
+const port = parseInt(process.env.DB_PORT || defaultPort, 10);
+
 const sequelize = new Sequelize(
   process.env.DB_NAME,
   process.env.DB_USER,
   process.env.DB_PASSWORD,
   {
     host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 5432,
-    dialect: "postgres",
+    port: port,
+    dialect: dialect,
     logging: console.log,
     dialectOptions: {
       connectTimeout: 10000,
@@ -19,13 +23,13 @@ const sequelize = new Sequelize(
 );
 
 (async () => {
-  console.log("Connecting to PostgreSQL at:", process.env.DB_HOST, "Port:", process.env.DB_PORT, "DB:", process.env.DB_NAME);
+  console.log(`Connecting to ${dialect.toUpperCase()} at:`, process.env.DB_HOST, "Port:", port, "DB:", process.env.DB_NAME);
   try {
     await sequelize.authenticate();
-    console.log("SUCCESS: Connected to Hostinger PostgreSQL Database! ✅");
+    console.log("SUCCESS: Connected to Hostinger Database via Sequelize! ✅");
     process.exit(0);
   } catch (err) {
-    console.error("ERROR connecting to DB: ❌", err.message);
+    console.error("ERROR connecting to DB: ❌", err);
     process.exit(1);
   }
 })();

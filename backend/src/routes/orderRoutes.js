@@ -57,6 +57,20 @@ router.get(
   orderController.getOrderTracking
 );
 
+// Submit Order Review
+router.post(
+  "/:id/review",
+  verifyToken,
+  allowRoles("CUSTOMER"),
+  orderController.submitOrderReview
+);
+router.post(
+  "/review",
+  verifyToken,
+  allowRoles("CUSTOMER"),
+  orderController.submitOrderReview
+);
+
 /**
  * ADMIN ROUTES — declared BEFORE /:id wildcard to prevent route shadowing
  */

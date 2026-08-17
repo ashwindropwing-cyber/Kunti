@@ -7,14 +7,7 @@ const redisClient = require("../config/redis");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
 
-const Op = {
-  gte: "gte",
-  lte: "lte",
-  gt: "gt",
-  lt: "lt",
-  in: "in",
-  iLike: "iLike"
-};
+const { Op } = require("sequelize");
 
 async function clearProductCaches(productId) {
   const keysToDelete = ["all_products"];
@@ -48,7 +41,7 @@ exports.getAdminAllProducts = asyncHandler(async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   let whereCondition = {};
   if (search) {
-    whereCondition.name = { [Op.iLike]: `%${search}%` };
+    whereCondition.name = { [Op.like]: `%${search}%` };
   }
   if (category_id) {
     whereCondition.category_id = category_id;

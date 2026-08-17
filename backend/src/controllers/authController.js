@@ -102,14 +102,6 @@ exports.verifyRegisterOTP = asyncHandler(async (req, res) => {
     password: hashedPassword,
     role,
   });
-
-  await Wallet.create({
-    user_id: user.id,
-    available_balance: 0,
-    pending_balance: 0,
-    total_earned: 0,
-  });
-
   await OTP.destroy({ where: { phone } });
 
   const token = jwt.sign(
@@ -480,12 +472,12 @@ exports.adminLogin = asyncHandler(async (req, res) => {
   const { Op } = require("sequelize");
   const whereClause = email
     ? {
-        [Op.or]: [
-          { email: email },
-          { email: `${email}@dropwinggroups.com` },
-          { phone: email }
-        ]
-      }
+      [Op.or]: [
+        { email: email },
+        { email: `${email}@dropwinggroups.com` },
+        { phone: email }
+      ]
+    }
     : { phone };
   const user = await User.findOne({ where: whereClause });
 
@@ -604,4 +596,4 @@ exports.verifyOTP = asyncHandler(async (req, res) => {
       role: user.role
     }
   }, "OTP verified successfully");
-});
+});

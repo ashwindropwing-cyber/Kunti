@@ -12,11 +12,13 @@ exports.saveAddress = async (req, res) => {
     return res.status(401).json({ message: "Unauthorized user" });
   }
   try {
-
     let {
       label,
+      address_type,
       house_no,
+      address_line1,
       area,
+      address_line2,
       landmark,
       city,
       state,
@@ -30,47 +32,37 @@ exports.saveAddress = async (req, res) => {
     const User = require("../models/user");
     const userDoc = await User.findOne({ where: { id: userId } });
     if (userDoc) {
-      if (!name) name = userDoc.name;
-      if (!phone_number) phone_number = userDoc.phone;
+      if (!name) name = userDoc.name || "Customer";
+      if (!phone_number) phone_number = userDoc.phone || "";
+    } else {
+      if (!name) name = "Customer";
+      if (!phone_number) phone_number = "";
     }
 
-    house_no = house_no || "";
+    const finalLine1 = (address_line1 || house_no || "").trim();
+    const finalLine2 = (address_line2 || area || "").trim();
+    const finalType = (address_type || label || "HOME").toUpperCase();
+    const finalCity = (city || "Kolkata").trim();
+    const finalState = (state || "West Bengal").trim();
+    const finalPincode = (pincode || "700001").toString().trim();
 
-    // ✅ Validate required fields properly
-    if (
-      !label ||
-      !area ||
-      !city ||
-      !state ||
-      !pincode ||
-      !name ||
-      !phone_number ||
-      latitude === undefined ||
-      longitude === undefined
-    ) {
-      return res.status(400).json({ message: "Missing required fields (label, area, city, state, pincode, name, phone_number, latitude, longitude)" });
+    if (!finalLine1 || !finalLine2) {
+      return res.status(400).json({ message: "Address line 1 (house no) and line 2 (area) are required" });
     }
 
-    const lat = parseFloat(latitude);
-    const lng = parseFloat(longitude);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      return res.status(400).json({ message: "Invalid latitude or longitude" });
-    }
+    const lat = latitude !== undefined && latitude !== null ? parseFloat(latitude) : 0.0;
+    const lng = longitude !== undefined && longitude !== null ? parseFloat(longitude) : 0.0;
 
     const address = await CustomerAddress.create({
       user_id: userId,
-      label,
-      house_no,
-      area,
-      landmark,
-      city,
-      state,
-      pincode,
-      latitude: lat,
-      longitude: lng,
-      name,
-      phone_number,
+      address_line1: finalLine1,
+      address_line2: finalLine2,
+      landmark: landmark || "",
+      city: finalCity,
+      pincode: finalPincode,
+      latitude: isNaN(lat) ? 0.0 : lat,
+      longitude: isNaN(lng) ? 0.0 : lng,
+      address_type: finalType,
       is_default: false,
     });
 
@@ -84,9 +76,19 @@ exports.saveAddress = async (req, res) => {
       await CustomerAddress.update({ is_default: true }, { where: { id: address.id } });
     }
 
+    const formatted = {
+      ...address.toJSON(),
+      house_no: address.address_line1,
+      area: address.address_line2,
+      label: address.address_type,
+      name,
+      phone_number,
+      state: finalState,
+    };
+
     return res.status(201).json({
       message: "Address saved successfully",
-      address,
+      address: formatted,
     });
 
   } catch (error) {
@@ -106,7 +108,17 @@ exports.getAddresses = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
 
-    return res.json(addresses);
+    const formatted = addresses.map(addr => {
+      const data = addr.toJSON();
+      return {
+        ...data,
+        house_no: data.address_line1,
+        area: data.address_line2,
+        label: data.address_type,
+      };
+    });
+
+    return res.json(formatted);
 
   } catch (error) {
     console.error("Get addresses error:", error);

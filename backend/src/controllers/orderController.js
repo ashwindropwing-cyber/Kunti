@@ -1,5 +1,6 @@
 const { Op } = require("sequelize");
-const { MasterOrder, OrderItem, Cart, CartItem, Product, User, CustomerAddress, Rider, PlatformSettings, Coupon, CouponUsage, sequelize } = require("../models");
+const { MasterOrder, OrderItem, Cart, CartItem, Product, User, CustomerAddress, Rider, PlatformSettings, Coupon, CouponUsage, Review, sequelize } = require("../models");
+const razorpay = require("../config/razorpay");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
 const { calculateRoadDistance } = require("../utils/geoUtils");
@@ -16,13 +17,14 @@ function generateOrderNumber() {
 // ─── CREATE ORDER ─────────────────────────────────────────────────────────────
 exports.createOrder = asyncHandler(async (req, res) => {
   const userId = req.user.id;
-  const { address_id, payment_method, notes, order_type, table_number, coupon_code } = req.body;
+  const { address_id, delivery_address_id, payment_method, notes, order_type, table_number, coupon_code } = req.body;
+  const resolvedAddressId = address_id || delivery_address_id;
 
   // Validate order type — default to DELIVERY
   const validOrderTypes = ["DELIVERY", "DINE_IN"];
   const selectedOrderType = validOrderTypes.includes(order_type) ? order_type : "DELIVERY";
 
-  const validPaymentMethods = ["COD", "ONLINE"];
+  const validPaymentMethods = ["COD", "ONLINE", "WALLET"];
   const selectedPaymentMethod = validPaymentMethods.includes(payment_method) ? payment_method : "COD";
 
   // ── DELIVERY — requires address + 5km radius check ────────────────────────
@@ -39,11 +41,11 @@ exports.createOrder = asyncHandler(async (req, res) => {
   const shopLng = parseFloat(settingsMap.shop_lng) || 88.3639;
 
   if (selectedOrderType === "DELIVERY") {
-    if (!address_id) {
+    if (!resolvedAddressId) {
       return ApiResponse.error(res, "Delivery address is required for delivery orders", 400);
     }
 
-    address = await CustomerAddress.findOne({ where: { id: address_id, user_id: userId } });
+    address = await CustomerAddress.findOne({ where: { id: resolvedAddressId, user_id: userId } });
     if (!address) {
       return ApiResponse.error(res, "Selected delivery address not found", 404);
     }
@@ -212,13 +214,44 @@ exports.createOrder = asyncHandler(async (req, res) => {
     include: [{ model: OrderItem, as: "items" }],
   });
 
+  let razorpayOrderId = null;
+  let paymentRequired = false;
+
+  if (selectedPaymentMethod === "ONLINE") {
+    paymentRequired = true;
+    try {
+      const rzpOrder = await razorpay.orders.create({
+        amount: Math.round(parseFloat(createdOrder.total_amount) * 100),
+        currency: "INR",
+        receipt: createdOrder.id,
+      });
+      razorpayOrderId = rzpOrder.id;
+      createdOrder.razorpay_order_id = rzpOrder.id;
+      await createdOrder.save();
+    } catch (rzpErr) {
+      console.warn("Razorpay order creation fallback:", rzpErr.message);
+      razorpayOrderId = `rzp_order_${createdOrder.id.substring(0, 10)}`;
+      createdOrder.razorpay_order_id = razorpayOrderId;
+      await createdOrder.save();
+    }
+  }
+
   notifyAdmin({
     title: `New Order #${createdOrder.order_number || createdOrder.id}! 🍕`,
     body: `New order placed for ₹${createdOrder.total_amount}. Tap to view in Admin app.`,
     data: { order_id: createdOrder.id.toString(), type: "NEW_ORDER" },
   });
 
-  return ApiResponse.success(res, createdOrder, "Order placed successfully", 201);
+  const responseData = {
+    ...createdOrder.toJSON(),
+    order_id: createdOrder.id,
+    master_order_id: createdOrder.id,
+    payment_required: paymentRequired,
+    razorpay_order_id: razorpayOrderId,
+    razorpay_key_id: process.env.RAZORPAY_KEY_ID || "",
+  };
+
+  return ApiResponse.success(res, responseData, "Order placed successfully", 201);
 });
 
 
@@ -231,7 +264,7 @@ exports.getUserOrders = asyncHandler(async (req, res) => {
     order: [["createdAt", "DESC"]],
   });
 
-  return ApiResponse.success(res, orders);
+  return ApiResponse.success(res, orders.map(o => o.toJSON ? o.toJSON() : o));
 });
 
 // ─── GET ORDER BY ID ──────────────────────────────────────────────────────────
@@ -253,7 +286,7 @@ exports.getOrderById = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Access denied", 403);
   }
 
-  return ApiResponse.success(res, order);
+  return ApiResponse.success(res, order.toJSON ? order.toJSON() : order);
 });
 
 // ─── GET ORDER TRACKING (STATUS ONLY) ─────────────────────────────────────────
@@ -627,5 +660,126 @@ exports.verifyDeliveryOTP = asyncHandler(async (req, res) => {
   await order.save();
 
   return ApiResponse.success(res, order, "Delivery OTP verified and order marked as DELIVERED successfully!");
+});
+
+// ─── CANCEL ORDER (CUSTOMER / ADMIN) ─────────────────────────────────────────
+exports.cancelOrder = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { cancel_reason } = req.body;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  const order = await MasterOrder.findByPk(id, {
+    include: [{ model: OrderItem, as: "items" }],
+  });
+
+  if (!order) {
+    return ApiResponse.error(res, "Order not found", 404);
+  }
+
+  if (userRole === "CUSTOMER" && order.user_id !== userId) {
+    return ApiResponse.error(res, "Access denied: this order does not belong to you", 403);
+  }
+
+  if (["DELIVERED", "CANCELLED"].includes(order.status)) {
+    return ApiResponse.error(res, `Cannot cancel an order that is already ${order.status}`, 400);
+  }
+
+  if (userRole === "CUSTOMER" && !["PLACED", "ACCEPTED", "PENDING"].includes(order.status)) {
+    return ApiResponse.error(res, `Order is already ${order.status} and cannot be cancelled by customer`, 400);
+  }
+
+  // Restore inventory stock
+  if (order.items && order.items.length > 0) {
+    for (const item of order.items) {
+      if (item.product_id && item.quantity) {
+        await Product.increment("stock_quantity", {
+          by: item.quantity,
+          where: { id: item.product_id },
+        }).catch(err => console.warn("Stock restore warn:", err.message));
+      }
+    }
+  }
+
+  order.status = "CANCELLED";
+  order.cancel_reason = cancel_reason || "Cancelled by user";
+  order.cancelled_by = userRole;
+  await order.save();
+
+  return ApiResponse.success(res, order.toJSON(), "Order cancelled successfully");
+});
+
+// ─── SUBMIT ORDER REVIEW (CUSTOMER) ──────────────────────────────────────────
+exports.submitOrderReview = asyncHandler(async (req, res) => {
+  const orderId = req.params.id || req.body.order_id;
+  const { productReviews, riderRating, riderComment } = req.body;
+  const userId = req.user.id;
+
+  let order = null;
+  if (orderId) {
+    order = await MasterOrder.findByPk(orderId);
+  }
+
+  // 1. Process Product Reviews
+  if (productReviews && Array.isArray(productReviews)) {
+    for (const rev of productReviews) {
+      const pId = rev.productId || rev.product_id;
+      const rating = parseFloat(rev.rating) || 5.0;
+      const comment = rev.comment || rev.reviewText || "";
+
+      if (pId) {
+        await Review.create({
+          user_id: userId,
+          product_id: pId,
+          rating,
+          comment,
+          review_type: "PRODUCT",
+        });
+
+        // Recalculate Product average rating
+        const allReviews = await Review.findAll({
+          where: { product_id: pId, review_type: "PRODUCT" },
+        });
+        const totalRating = allReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
+        const avg = allReviews.length > 0 ? (totalRating / allReviews.length) : rating;
+
+        await Product.update(
+          {
+            rating: parseFloat(avg.toFixed(1)),
+            rating_count: allReviews.length,
+          },
+          { where: { id: pId } }
+        );
+      }
+    }
+  }
+
+  // 2. Process Rider Review
+  if (riderRating && order && order.rider_id) {
+    const rRating = parseFloat(riderRating);
+    await Review.create({
+      user_id: userId,
+      rider_id: order.rider_id,
+      rating: rRating,
+      comment: riderComment || "",
+      review_type: "RIDER",
+    });
+
+    const allRiderReviews = await Review.findAll({
+      where: { rider_id: order.rider_id, review_type: "RIDER" },
+    });
+    const totalRiderRating = allRiderReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
+    const avgRider = allRiderReviews.length > 0 ? (totalRiderRating / allRiderReviews.length) : rRating;
+
+    await Rider.update(
+      {
+        rating: parseFloat(avgRider.toFixed(1)),
+        rating_count: allRiderReviews.length,
+      },
+      { where: { id: order.rider_id } }
+    );
+  }
+
+  return ApiResponse.success(res, { success: true }, "Review submitted successfully!");
 });
 

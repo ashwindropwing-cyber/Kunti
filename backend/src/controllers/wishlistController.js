@@ -99,6 +99,7 @@ exports.getWishlist = async (req, res) => {
         return null;
       }
 
+      const discPrice = product.discount_price ? parseFloat(product.discount_price) : parseFloat(product.price);
       return {
         id: item.id,
         user_id: item.user_id,
@@ -107,8 +108,11 @@ exports.getWishlist = async (req, res) => {
           id: product.id,
           name: product.name,
           image_url: product.image_url,
-          selling_price: product.selling_price,
-          description: product.description,
+          price: parseFloat(product.price),
+          discount_price: product.discount_price ? parseFloat(product.discount_price) : null,
+          selling_price: discPrice,
+          description: product.description || "",
+          category_id: product.category_id,
         },
         createdAt: item.createdAt
       };

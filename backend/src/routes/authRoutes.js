@@ -23,4 +23,9 @@ router.post("/rider/verify-otp", authLimiter, authController.verifyRiderOTP);
 router.post("/forgot-password", otpLimiter, authController.forgotPassword);
 router.post("/reset-password", authLimiter, authController.resetPassword);
 
+// 🔔 FCM Push Token Update (Unified for all logged-in roles)
+const { verifyToken } = require("../middlewares/authMiddleware");
+router.post("/fcm-token", verifyToken, authController.updateFcmToken);
+router.patch("/fcm-token", verifyToken, authController.updateFcmToken);
+
 module.exports = router;

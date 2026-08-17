@@ -11,14 +11,39 @@ async function sendFcmNotification({ token, topic, title, body, data = {} }) {
   }
 
   try {
+    const stringifiedData = {};
+    if (data && typeof data === "object") {
+      for (const [key, val] of Object.entries(data)) {
+        if (val !== null && val !== undefined) {
+          stringifiedData[key] = typeof val === "object" ? JSON.stringify(val) : String(val);
+        }
+      }
+    }
+    stringifiedData.clickAction = "FLUTTER_NOTIFICATION_CLICK";
+
     const payload = {
       notification: {
         title,
         body,
       },
-      data: {
-        clickAction: "FLUTTER_NOTIFICATION_CLICK",
-        ...data,
+      data: stringifiedData,
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "kunti_notifications",
+          priority: "max",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            badge: 1,
+          },
+        },
       },
     };
 
@@ -32,10 +57,10 @@ async function sendFcmNotification({ token, topic, title, body, data = {} }) {
     }
 
     const response = await admin.messaging().send(payload);
-    console.log(`[FCM Success] Sent message: ${title} (Response: ${response})`);
+    console.log(`[FCM Success] Sent message: "${title}" (Response: ${response})`);
     return true;
   } catch (error) {
-    console.error(`[FCM Error] Failed to send notification (${title}):`, error.message);
+    console.error(`[FCM Error] Failed to send notification ("${title}"):`, error.message);
     return false;
   }
 }
@@ -44,34 +69,42 @@ async function sendFcmNotification({ token, topic, title, body, data = {} }) {
  * Send FCM notification to all Admins (via topic 'admin_notifications' and admin user tokens).
  */
 async function notifyAdmin({ title, body, data = {} }) {
-  // 1. Broadcast to topic 'admin_notifications'
-  await sendFcmNotification({
-    topic: "admin_notifications",
-    title,
-    body,
-    data: { role: "ADMIN", ...data },
-  });
+  let sentCount = 0;
 
-  // 2. Also send to specific admin user tokens if stored
+  // 1. Send to all registered Admin users by direct token
   try {
     const adminUsers = await User.findAll({
       where: { role: "ADMIN" },
-      attributes: ["id", "fcm_token"],
+      attributes: ["id", "name", "fcm_token"],
     });
 
     for (const adminUser of adminUsers) {
       if (adminUser.fcm_token) {
-        await sendFcmNotification({
+        const success = await sendFcmNotification({
           token: adminUser.fcm_token,
           title,
           body,
           data: { role: "ADMIN", ...data },
         });
+        if (success) sentCount++;
       }
     }
   } catch (err) {
     console.error("[FCM] Failed fetching admin user tokens:", err.message);
   }
+
+  // 2. Also broadcast to topic 'admin_notifications' for admin web/app listeners
+  try {
+    await sendFcmNotification({
+      topic: "admin_notifications",
+      title,
+      body,
+      data: { role: "ADMIN", ...data },
+    });
+  } catch (_) {}
+
+  console.log(`[FCM] Admin notified: "${title}" (Delivered to ${sentCount} direct admin token(s) & topic)`);
+  return true;
 }
 
 /**
@@ -103,8 +136,38 @@ async function notifyRider(riderOrId, { title, body, data = {} }) {
   }
 }
 
+/**
+ * Send FCM notification to a specific Customer/User.
+ */
+async function notifyCustomer(userIdOrUser, { title, body, data = {} }) {
+  try {
+    let user = userIdOrUser;
+    if (typeof userIdOrUser === "object" && userIdOrUser !== null && userIdOrUser.fcm_token !== undefined) {
+      user = userIdOrUser;
+    } else if (userIdOrUser) {
+      user = await User.findByPk(userIdOrUser, { attributes: ["id", "fcm_token"] });
+    }
+
+    if (!user || !user.fcm_token) {
+      return false;
+    }
+
+    return await sendFcmNotification({
+      token: user.fcm_token,
+      title,
+      body,
+      data: { role: "CUSTOMER", ...data },
+    });
+  } catch (err) {
+    console.error("[FCM] Error notifying customer:", err.message);
+    return false;
+  }
+}
+
 module.exports = {
   sendFcmNotification,
   notifyAdmin,
   notifyRider,
+  notifyCustomer,
 };
+

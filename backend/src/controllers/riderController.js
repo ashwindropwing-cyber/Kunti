@@ -105,6 +105,7 @@ exports.register = asyncHandler(async (req, res) => {
   let user = await User.findOne({ where: { phone } });
   if (user) {
     user.name = name;
+    user.role = "RIDER";
     if (email) user.email = email;
     await user.save();
   } else {
@@ -297,6 +298,10 @@ exports.updateFcmToken = async (req, res) => {
 
     if (normalizedToken) {
       rider.fcm_token = normalizedToken;
+      try {
+        const User = require("../models/user");
+        await User.update({ fcm_token: normalizedToken }, { where: { id: userId } });
+      } catch (_) {}
     }
     if (orderNotificationsEnabled !== undefined) {
       rider.order_notifications_enabled = orderNotificationsEnabled === true || orderNotificationsEnabled === "true";

@@ -21,8 +21,8 @@ exports.getDashboardMetrics = asyncHandler(async (req, res) => {
     totalProducts,
     pendingRiders,
     todayOrdersCount,
-    deliveredOrders,
-    todayOrdersList,
+    deliveredOrdersCount,
+    allOrders,
   ] = await Promise.all([
     User.count({ where: { role: "CUSTOMER" } }),
     Rider.count(),
@@ -33,37 +33,115 @@ exports.getDashboardMetrics = asyncHandler(async (req, res) => {
     MasterOrder.count({ where: { status: "DELIVERED" } }),
     MasterOrder.findAll({
       where: {
-        createdAt: { [Op.gte]: today },
         status: { [Op.ne]: "CANCELLED" },
       },
+      order: [["createdAt", "DESC"]],
     }),
   ]);
 
-  const todayRevenue = todayOrdersList.reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
-  const avgOrderValue = todayOrdersList.length > 0 ? (todayRevenue / todayOrdersList.length) : 0;
+  const todayOrdersList = allOrders.filter(
+    (o) => new Date(o.createdAt) >= today
+  );
 
-  return ApiResponse.success(res, {
+  // Today's revenue: sum of non-cancelled orders created today
+  const todayRevenue = todayOrdersList.reduce(
+    (sum, o) => sum + (parseFloat(o.total_amount) || 0),
+    0
+  );
+
+  // Total Lifetime Revenue: sum of all non-cancelled / delivered orders
+  const totalRevenue = allOrders.reduce(
+    (sum, o) => sum + (parseFloat(o.total_amount) || 0),
+    0
+  );
+
+  // Average Order Value
+  const relevantOrdersForAvg = todayOrdersList.length > 0 ? todayOrdersList : allOrders;
+  const avgOrderValue = relevantOrdersForAvg.length > 0
+    ? (relevantOrdersForAvg.reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0) / relevantOrdersForAvg.length)
+    : 0;
+
+  // Payment Breakdown: Online vs COD
+  const codOrders = allOrders.filter(
+    (o) => (o.payment_method || "").toUpperCase() === "COD" || (o.payment_method || "").toUpperCase() === "CASH"
+  );
+  const onlineOrders = allOrders.filter(
+    (o) => (o.payment_method || "").toUpperCase() === "ONLINE" || (o.payment_method || "").toUpperCase() === "RAZORPAY" || (o.payment_method || "").toUpperCase() === "UPI"
+  );
+  const totalPaymentOrders = codOrders.length + onlineOrders.length;
+  const onlinePercentage = totalPaymentOrders > 0
+    ? parseFloat(((onlineOrders.length / totalPaymentOrders) * 100).toFixed(1))
+    : 50.0;
+  const codPercentage = totalPaymentOrders > 0
+    ? parseFloat(((codOrders.length / totalPaymentOrders) * 100).toFixed(1))
+    : 50.0;
+
+  // 7-day daily revenue trend
+  const last7Days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    d.setHours(0, 0, 0, 0);
+    const dNext = new Date(d);
+    dNext.setDate(dNext.getDate() + 1);
+
+    const dayOrders = allOrders.filter((o) => {
+      const oDate = new Date(o.createdAt);
+      return oDate >= d && oDate < dNext;
+    });
+    const dayRev = dayOrders.reduce((sum, o) => sum + (parseFloat(o.total_amount) || 0), 0);
+    last7Days.push(dayRev);
+  }
+
+  const responseData = {
     overview: {
       users: totalUsers,
       riders: totalRiders,
       orders: totalOrders,
       products: totalProducts,
       today_orders: todayOrdersCount,
-      delivered_orders: deliveredOrders,
+      delivered_orders: deliveredOrdersCount,
+      today_revenue: parseFloat(todayRevenue.toFixed(2)),
+      total_revenue: parseFloat(totalRevenue.toFixed(2)),
       todayRevenue: parseFloat(todayRevenue.toFixed(2)),
-      totalOrdersToday: todayOrdersCount,
+      totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+      avg_order_value: parseFloat(avgOrderValue.toFixed(2)),
       avgOrderValue: parseFloat(avgOrderValue.toFixed(2)),
+      active_customers_count: totalUsers,
       activeCustomersCount: totalUsers,
+      online_percentage: onlinePercentage,
+      onlinePercentage: onlinePercentage,
+      cod_percentage: codPercentage,
+      codPercentage: codPercentage,
+      weekly_revenue_trend: last7Days,
+      weeklyRevenueTrend: last7Days,
     },
     todayRevenue: parseFloat(todayRevenue.toFixed(2)),
+    today_revenue: parseFloat(todayRevenue.toFixed(2)),
+    totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+    total_revenue: parseFloat(totalRevenue.toFixed(2)),
     totalOrdersToday: todayOrdersCount,
+    today_orders: todayOrdersCount,
+    totalOrders: totalOrders,
+    deliveredOrders: deliveredOrdersCount,
+    delivered_orders: deliveredOrdersCount,
     avgOrderValue: parseFloat(avgOrderValue.toFixed(2)),
+    avg_order_value: parseFloat(avgOrderValue.toFixed(2)),
     activeCustomersCount: totalUsers,
+    active_customers_count: totalUsers,
+    onlinePercentage: onlinePercentage,
+    online_percentage: onlinePercentage,
+    codPercentage: codPercentage,
+    cod_percentage: codPercentage,
+    weeklyRevenueTrend: last7Days,
+    weekly_revenue_trend: last7Days,
     pending_approvals: {
       total: pendingRiders,
       riders: pendingRiders,
     },
-  });
+  };
+
+  return ApiResponse.success(res, responseData);
 });
 
 exports.createRiderByAdmin = asyncHandler(async (req, res) => {
@@ -80,42 +158,78 @@ exports.createRiderByAdmin = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Name and phone are required", 400);
   }
 
-  const existingUser = await User.findOne({
-    where: { phone },
+  const rawPhone = phone.toString().trim();
+  const digitsOnly = rawPhone.replace(/\D/g, "");
+  const last10 = digitsOnly.slice(-10);
+
+  const phoneVariants = [rawPhone, digitsOnly, last10, `+91${last10}`, `91${last10}`].filter(Boolean);
+
+  let user = await User.findOne({
+    where: {
+      phone: { [Op.in]: phoneVariants },
+    },
   });
 
-  if (existingUser) {
-    return ApiResponse.error(res, "User with this phone number already exists", 400);
+  if (!user && last10.length === 10) {
+    user = await User.findOne({
+      where: {
+        phone: { [Op.like]: `%${last10}` },
+      },
+    });
   }
 
-  const user = await User.create({
-    name,
-    phone,
-    email: email || null,
-    role: "RIDER"
-  });
+  if (user) {
+    user.name = name;
+    user.role = "RIDER";
+    if (email) user.email = email;
+    await user.save();
+  } else {
+    user = await User.create({
+      name,
+      phone: last10.length === 10 ? last10 : rawPhone,
+      email: email || null,
+      role: "RIDER",
+    });
+  }
 
-  const rider = await Rider.create({
-    user_id: user.id,
-    vehicle_type: vehicle_type || "Bike",
-    vehicle_number: vehicle_number || "",
-    address: address || "",
-    license_number: license_number || dl_number || "",
-    aadhar_number: aadhar_number || "",
-    date_of_birth: date_of_birth || "",
-    delivery_radius_km: delivery_radius_km ? parseFloat(delivery_radius_km) : 5.0,
-    profile_picture_url: profile_picture_url || avatar_url || "",
-    cod_limit: cod_limit ? parseFloat(cod_limit) : 0,
-    is_verified: true,
-    is_available: true,
-  });
+  let rider = await Rider.findOne({ where: { user_id: user.id } });
+
+  if (rider) {
+    rider.vehicle_type = vehicle_type || rider.vehicle_type || "Bike";
+    rider.vehicle_number = vehicle_number || rider.vehicle_number || "";
+    rider.address = address || rider.address || "";
+    rider.license_number = license_number || dl_number || rider.license_number || "";
+    rider.aadhar_number = aadhar_number || rider.aadhar_number || "";
+    rider.date_of_birth = date_of_birth || rider.date_of_birth || "";
+    if (delivery_radius_km) rider.delivery_radius_km = parseFloat(delivery_radius_km);
+    if (profile_picture_url || avatar_url) rider.profile_picture_url = profile_picture_url || avatar_url;
+    if (cod_limit) rider.cod_limit = parseFloat(cod_limit);
+    rider.is_verified = true;
+    rider.is_available = true;
+    await rider.save();
+  } else {
+    rider = await Rider.create({
+      user_id: user.id,
+      vehicle_type: vehicle_type || "Bike",
+      vehicle_number: vehicle_number || "",
+      address: address || "",
+      license_number: license_number || dl_number || "",
+      aadhar_number: aadhar_number || "",
+      date_of_birth: date_of_birth || "",
+      delivery_radius_km: delivery_radius_km ? parseFloat(delivery_radius_km) : 5.0,
+      profile_picture_url: profile_picture_url || avatar_url || "",
+      cod_limit: cod_limit ? parseFloat(cod_limit) : 0,
+      is_verified: true,
+      is_available: true,
+    });
+  }
 
   return ApiResponse.success(res, {
     rider_id: rider.id,
     user_id: user.id,
     rider,
     user,
-  }, "Rider created successfully", 201);
+  }, "Rider registered successfully", 201);
 });
 
 exports.getAllRiders = asyncHandler(async (req, res) => {

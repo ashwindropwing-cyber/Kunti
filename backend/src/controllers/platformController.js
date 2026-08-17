@@ -78,6 +78,24 @@ const DEFAULT_SETTINGS = [
         type: "number",
         description: "GST percentage applied (in %)",
     },
+    {
+        key: "address",
+        value: "Shop #12, Ground Floor, Sector 5, Salt Lake, Kolkata, 700091",
+        type: "string",
+        description: "Store physical address",
+    },
+    {
+        key: "support_email",
+        value: "support@kuntiandekafanda.in",
+        type: "string",
+        description: "Store customer support email",
+    },
+    {
+        key: "phone",
+        value: "+91 98765 43210",
+        type: "string",
+        description: "Store contact number",
+    },
 ];
 
 const SETTINGS_REDIS_KEY = "platform_settings_map";
@@ -250,7 +268,7 @@ exports.uploadImage = asyncHandler(async (req, res) => {
     if (!file) {
         return ApiResponse.error(res, "No file uploaded", 400);
     }
-    const fileUrl = file.filename ? `/uploads/${file.filename}` : (file.path || "");
+    const fileUrl = file.path || (file.filename ? `/uploads/${file.filename}` : "");
     return ApiResponse.success(res, { url: fileUrl, imageUrl: fileUrl }, "Image uploaded successfully");
 });
 

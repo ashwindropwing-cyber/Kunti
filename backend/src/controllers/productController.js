@@ -119,7 +119,17 @@ exports.adminCreateProduct = async (req, res) => {
     const finalDiscountPrice = (discount_price !== undefined || selling_price !== undefined) 
       ? parseFloat(discount_price !== undefined ? discount_price : selling_price) 
       : null;
-    const finalCategory = category_id;
+    let finalCategory = category_id;
+    if (!finalCategory && (req.body.category_name || req.body.category)) {
+      const cat = await Category.findOne({
+        where: { name: req.body.category_name || req.body.category }
+      });
+      if (cat) finalCategory = cat.id;
+    }
+    if (!finalCategory) {
+      const firstCat = await Category.findOne({ order: [["display_order", "ASC"]] });
+      if (firstCat) finalCategory = firstCat.id;
+    }
 
     if (!name || isNaN(finalPrice) || !finalCategory) {
       return res.status(400).json({ message: "Missing required fields (name, price, category_id)" });
@@ -136,7 +146,7 @@ exports.adminCreateProduct = async (req, res) => {
       price: finalPrice,
       discount_price: finalDiscountPrice,
       stock_quantity: stock_quantity !== undefined ? parseInt(stock_quantity) : (quantity !== undefined ? parseInt(quantity) : 100),
-      image_url: req.file ? req.file.path : null,
+      image_url: req.file ? req.file.path : (req.body.image_url || req.body.imageUrl || req.body.image || null),
       is_veg: isVegVal,
       food_type: food_type || (isVegVal ? "veg" : "nonVeg"),
       is_bestseller: is_bestseller === true || is_bestseller === "true",
@@ -172,7 +182,14 @@ exports.adminUpdateProduct = async (req, res) => {
 
     if (name !== undefined) product.name = name;
     if (description !== undefined) product.description = description;
-    if (category_id !== undefined) product.category_id = category_id;
+    if (category_id !== undefined) {
+      product.category_id = category_id;
+    } else if (req.body.category_name || req.body.category) {
+      const cat = await Category.findOne({
+        where: { name: req.body.category_name || req.body.category }
+      });
+      if (cat) product.category_id = cat.id;
+    }
     if (price !== undefined) product.price = parseFloat(price);
     else if (mrp !== undefined) product.price = parseFloat(mrp);
 
@@ -193,9 +210,11 @@ exports.adminUpdateProduct = async (req, res) => {
       product.food_type = product.is_veg ? "veg" : "nonVeg";
     }
 
-    if (is_bestseller !== undefined) product.is_bestseller = is_bestseller === true || is_bestseller === "true";
-    if (rating !== undefined) product.rating = parseFloat(rating);
-    if (req.file) product.image_url = req.file.path;
+    if (req.file) {
+      product.image_url = req.file.path;
+    } else if (req.body.image_url !== undefined || req.body.imageUrl !== undefined) {
+      product.image_url = req.body.image_url || req.body.imageUrl;
+    }
 
     await product.save();
     await clearProductCaches(id);

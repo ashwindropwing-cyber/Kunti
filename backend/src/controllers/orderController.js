@@ -6,7 +6,7 @@ const asyncHandler = require("../utils/AsyncHandler");
 const { calculateRoadDistance } = require("../utils/geoUtils");
 const { getPlatformSettingsMap } = require("./platformController");
 const { validateCoupon } = require("./couponController");
-const { notifyAdmin, notifyRider } = require("../utils/fcmService");
+const { notifyAdmin, notifyRider, notifyCustomer } = require("../utils/fcmService");
 
 // Helper: Generate unique order number (e.g., KUNTI-100234)
 function generateOrderNumber() {
@@ -349,6 +349,21 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
   }
   await order.save();
 
+  if (status === "DELIVERED") {
+    notifyAdmin({
+      title: "Order Delivered! ✅",
+      body: `Order #${order.order_number || order.id} has been delivered successfully.`,
+      data: { order_id: order.id.toString(), type: "ORDER_DELIVERED" },
+    });
+    if (order.user_id) {
+      notifyCustomer(order.user_id, {
+        title: "Order Delivered! 😋",
+        body: `Your order #${order.order_number || order.id} has been delivered. Enjoy your meal!`,
+        data: { order_id: order.id.toString(), type: "ORDER_STATUS_CHANGE" },
+      });
+    }
+  }
+
   return ApiResponse.success(res, order, `Order status updated to ${status}`);
 });
 
@@ -365,24 +380,31 @@ exports.assignRider = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, `Cannot assign rider to a ${order.status} order`, 400);
   }
 
-  const rider = await Rider.findByPk(rider_id);
+  const rider = await Rider.findByPk(rider_id, {
+    include: [{ model: User, as: "user", attributes: ["name", "phone", "fcm_token"] }]
+  });
   if (!rider) return ApiResponse.error(res, "Rider not found", 404);
   if (!rider.is_verified) return ApiResponse.error(res, "Rider is not verified yet", 400);
 
   order.rider_id = rider.id;
-  // Flow: PLACED → ACCEPTED → PREPARING → ASSIGNED → OUT_FOR_DELIVERY → DELIVERED
-  // Rider is assigned after the kitchen has started preparing. Status becomes ASSIGNED.
-  order.status = "ASSIGNED";
+  // Auto-accept if the order is still pending/placed, then mark as ASSIGNED
+  if (["PLACED", "PENDING"].includes(order.status)) {
+    order.status = "ASSIGNED"; // skip the ACCEPTED step, go directly to ASSIGNED
+  } else {
+    order.status = "ASSIGNED";
+  }
   await order.save();
 
+  // Send FCM push notification to the rider's device
   notifyRider(rider, {
     title: "New Order Assigned 🛵",
-    body: `You have been assigned Order #${order.order_number || order.id}.`,
+    body: `You have been assigned Order #${order.order_number || order.id}. Tap to view.`,
     data: { order_id: order.id.toString(), type: "ORDER_ASSIGNED" },
   });
 
   return ApiResponse.success(res, order, "Rider assigned successfully");
 });
+
 
 // ─── BULK ASSIGN RIDER (ADMIN - BULK ORDERS FOR ONE RIDER) ─────────────────────
 exports.bulkAssignRider = asyncHandler(async (req, res) => {
@@ -481,6 +503,23 @@ exports.bulkUpdateRiderOrders = asyncHandler(async (req, res) => {
     include: [{ model: OrderItem, as: "items" }]
   });
 
+  if (status === "DELIVERED") {
+    for (const o of updatedOrders) {
+      notifyAdmin({
+        title: "Order Delivered! ✅",
+        body: `Order #${o.order_number || o.id} has been delivered.`,
+        data: { order_id: o.id.toString(), type: "ORDER_DELIVERED" },
+      });
+      if (o.user_id) {
+        notifyCustomer(o.user_id, {
+          title: "Order Delivered! 😋",
+          body: `Your order #${o.order_number || o.id} has been delivered. Enjoy your meal!`,
+          data: { order_id: o.id.toString(), type: "ORDER_STATUS_CHANGE" },
+        });
+      }
+    }
+  }
+
   return ApiResponse.success(
     res,
     { updated_count: updatedOrders.length, orders: updatedOrders },
@@ -531,6 +570,11 @@ exports.getAllOrders = asyncHandler(async (req, res) => {
     include: [
       { model: OrderItem, as: "items" },
       { model: User, as: "user", attributes: ["id", "name", "phone"] },
+      {
+        model: Rider,
+        as: "rider",
+        include: [{ model: User, as: "user", attributes: ["id", "name", "phone"] }],
+      },
     ],
     order: [["createdAt", "DESC"]],
     limit: parsedLimit,
@@ -622,6 +666,13 @@ exports.riderUpdateOrderStatus = asyncHandler(async (req, res) => {
       body: `Order #${order.order_number || order.id} has been delivered.`,
       data: { order_id: order.id.toString(), type: "ORDER_DELIVERED" },
     });
+    if (order.user_id) {
+      notifyCustomer(order.user_id, {
+        title: "Order Delivered! 😋",
+        body: `Your order #${order.order_number || order.id} has been delivered. Enjoy your meal!`,
+        data: { order_id: order.id.toString(), type: "ORDER_STATUS_CHANGE" },
+      });
+    }
   }
 
   return ApiResponse.success(res, order, `Order status updated to ${status}`);
@@ -658,6 +709,19 @@ exports.verifyDeliveryOTP = asyncHandler(async (req, res) => {
     order.is_paid = true;
   }
   await order.save();
+
+  notifyAdmin({
+    title: "Order Delivered! ✅",
+    body: `Order #${order.order_number || order.id} verified with OTP and delivered.`,
+    data: { order_id: order.id.toString(), type: "ORDER_DELIVERED" },
+  });
+  if (order.user_id) {
+    notifyCustomer(order.user_id, {
+      title: "Order Delivered! 😋",
+      body: `Your order #${order.order_number || order.id} has been delivered. Enjoy your meal!`,
+      data: { order_id: order.id.toString(), type: "ORDER_STATUS_CHANGE" },
+    });
+  }
 
   return ApiResponse.success(res, order, "Delivery OTP verified and order marked as DELIVERED successfully!");
 });

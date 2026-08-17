@@ -7,25 +7,29 @@ const { optimizeCloudinaryUrl, CLOUDINARY_TRANSFORMATIONS } = require("../utils/
 // ======================================
 exports.addCategory = async (req, res) => {
   try {
-    const { name, description, display_order, is_active } = req.body;
+    const { name, description, display_order, is_active, image_url, imageUrl, image, banner, banner_url } = req.body;
 
     if (!name) {
       return res.status(400).json({ message: "Category name required" });
     }
 
-    const imagePath = req.file ? req.file.path : null;
+    const imagePath = req.file
+      ? (req.file.path || req.file.secure_url || req.file.url)
+      : (image_url || imageUrl || image || banner || banner_url || null);
 
     const category = await Category.create({
-      name,
-      description: description || null,
+      name: name.trim(),
+      description: description ? description.trim() : null,
       display_order: display_order !== undefined ? parseInt(display_order) : 0,
       is_active: is_active !== undefined ? (is_active === true || is_active === "true") : true,
-      image_url: imagePath
+      image_url: (imagePath && typeof imagePath === "string" && imagePath.trim().isNotEmpty) ? imagePath.trim() : (imagePath || null)
     });
 
     // clear cache when category changes
-    await redisClient.del("categories");
-    await redisClient.del("categories_all");
+    try {
+      await redisClient.del("categories");
+      await redisClient.del("categories_all");
+    } catch (_) {}
 
     res.status(201).json(category);
 
@@ -44,12 +48,12 @@ exports.getCategories = async (req, res) => {
     const cacheKey = showAll ? "categories_all" : "categories";
 
     // check Redis cache
-    const cached = await redisClient.get(cacheKey);
-
-    if (cached) {
-      console.log("⚡ Categories from Redis cache");
-      return res.json(JSON.parse(cached));
-    }
+    try {
+      const cached = await redisClient.get(cacheKey);
+      if (cached) {
+        return res.json(JSON.parse(cached));
+      }
+    } catch (_) {}
 
     const whereCondition = showAll ? {} : { is_active: true };
 
@@ -69,13 +73,13 @@ exports.getCategories = async (req, res) => {
     });
 
     // save in Redis cache for 5 minutes
-    await redisClient.setEx(
-      cacheKey,
-      300,
-      JSON.stringify(formattedCategories)
-    );
-
-    console.log("📦 Categories from DB");
+    try {
+      await redisClient.setEx(
+        cacheKey,
+        300,
+        JSON.stringify(formattedCategories)
+      );
+    } catch (_) {}
 
     res.json(formattedCategories);
 
@@ -91,15 +95,15 @@ exports.getCategories = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, display_order, is_active } = req.body;
+    const { name, description, display_order, is_active, image_url, imageUrl, image, banner, banner_url } = req.body;
 
     const category = await Category.findByPk(id);
     if (!category) {
       return res.status(404).json({ message: "Category not found" });
     }
 
-    if (name !== undefined) category.name = name;
-    if (description !== undefined) category.description = description;
+    if (name !== undefined) category.name = name.trim();
+    if (description !== undefined) category.description = description ? description.trim() : null;
     if (display_order !== undefined) category.display_order = parseInt(display_order);
 
     // Parse is_active from FormData string to boolean
@@ -110,12 +114,23 @@ exports.updateCategory = async (req, res) => {
         category.is_active = Boolean(is_active);
       }
     }
-    if (req.file) category.image_url = req.file.path;
+
+    if (req.file) {
+      category.image_url = req.file.path || req.file.secure_url || req.file.url;
+    } else {
+      const explicitImg = image_url !== undefined ? image_url : (imageUrl !== undefined ? imageUrl : (image !== undefined ? image : (banner !== undefined ? banner : banner_url)));
+      if (explicitImg !== undefined) {
+        category.image_url = (explicitImg && typeof explicitImg === "string" && explicitImg.trim().isNotEmpty) ? explicitImg.trim() : (explicitImg || null);
+      }
+    }
 
     await category.save();
+
     // Clear both cache keys
-    await redisClient.del("categories");
-    await redisClient.del("categories_all");
+    try {
+      await redisClient.del("categories");
+      await redisClient.del("categories_all");
+    } catch (_) {}
 
     return res.status(200).json({
       message: "Category updated successfully",
@@ -140,8 +155,10 @@ exports.deleteCategory = async (req, res) => {
     }
 
     await category.destroy();
-    await redisClient.del("categories");
-    await redisClient.del("categories_all");
+    try {
+      await redisClient.del("categories");
+      await redisClient.del("categories_all");
+    } catch (_) {}
 
     return res.json({ message: "Category deleted successfully" });
   } catch (error) {

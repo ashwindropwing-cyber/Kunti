@@ -40,11 +40,19 @@ async function validateCoupon(code, userId, subtotal) {
   }
 
   const now = new Date();
-  if (coupon.start_date && new Date(coupon.start_date) > now) {
-    return { valid: false, message: "This coupon is not valid yet", coupon, discount: 0 };
+  if (coupon.start_date) {
+    const startDate = new Date(coupon.start_date);
+    startDate.setHours(0, 0, 0, 0);
+    if (startDate > now) {
+      return { valid: false, message: "This coupon is not valid yet", coupon, discount: 0 };
+    }
   }
-  if (coupon.end_date && new Date(coupon.end_date) < now) {
-    return { valid: false, message: "This coupon has expired", coupon, discount: 0 };
+  if (coupon.end_date) {
+    const endDate = new Date(coupon.end_date);
+    endDate.setHours(23, 59, 59, 999);
+    if (endDate < now) {
+      return { valid: false, message: "This coupon has expired", coupon, discount: 0 };
+    }
   }
 
   if (coupon.total_usage_limit && coupon.used_count >= coupon.total_usage_limit) {
@@ -207,15 +215,18 @@ exports.deleteCoupon = asyncHandler(async (req, res) => {
 
 // ─── CUSTOMER: LIST AVAILABLE COUPONS ──────────────────────────────────────
 exports.getAvailableCoupons = asyncHandler(async (req, res) => {
-  const userId = req.user.id;
   const now = new Date();
+  const endOfDay = new Date(now);
+  endOfDay.setHours(23, 59, 59, 999);
+  const startOfDay = new Date(now);
+  startOfDay.setHours(0, 0, 0, 0);
 
   // Fetch active coupons within valid date range
   const coupons = await Coupon.findAll({
     where: {
       is_active: true,
-      [Op.or]: [{ start_date: null }, { start_date: { [Op.lte]: now } }],
-      [Op.or]: [{ end_date: null }, { end_date: { [Op.gte]: now } }],
+      [Op.or]: [{ start_date: null }, { start_date: { [Op.lte]: endOfDay } }],
+      [Op.or]: [{ end_date: null }, { end_date: { [Op.gte]: startOfDay } }],
     },
     order: [["min_order_amount", "ASC"]],
   });

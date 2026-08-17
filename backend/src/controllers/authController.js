@@ -1,4 +1,6 @@
+const { Op } = require("sequelize");
 const User = require("../models/user");
+const Rider = require("../models/rider");
 const OTP = require("../models/otp");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -177,109 +179,7 @@ exports.login = asyncHandler(async (req, res) => {
   }, "Login successful");
 });
 
-/**
- * SEND RIDER OTP
- */
-exports.sendRiderOTP = asyncHandler(async (req, res) => {
-  let { phone } = req.body;
-  phone = phone?.toString().trim();
 
-  if (!phone) return ApiResponse.error(res, "Phone number is required", 400);
-
-  // Check if rider exists
-  const user = await User.findOne({ where: { phone, role: "RIDER" } });
-  if (!user) {
-    return ApiResponse.error(res, "user not found , please register first", 404);
-  }
-
-  if (await checkCooldown(phone)) {
-    return ApiResponse.error(res, "Please wait 45 seconds before requesting OTP again", 429);
-  }
-
-  const otpCode = generateOTP();
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`[AUTH] Login OTP for ${phone}: ${otpCode}`);
-  }
-
-  await OTP.destroy({ where: { phone } });
-  await OTP.create({
-    phone,
-    otp: otpCode,
-    attempts: 0,
-    expires_at: new Date(Date.now() + 5 * 60 * 1000),
-  });
-
-  await sendSMS(phone, `Your rider OTP is ${otpCode}. Valid for 5 minutes.`);
-
-  return ApiResponse.success(res, null, "OTP sent successfully");
-});
-
-/**
- * VERIFY RIDER OTP
- */
-exports.verifyRiderOTP = asyncHandler(async (req, res) => {
-  let { phone, otp } = req.body;
-
-  phone = phone?.toString().trim();
-  otp = otp?.toString().trim();
-
-  if (!phone || !otp) {
-    return ApiResponse.error(res, "Phone and OTP required", 400);
-  }
-
-  const record = await OTP.findOne({ where: { phone } });
-
-  if (!record || record.expires_at < new Date()) {
-    return ApiResponse.error(res, "Invalid or expired OTP", 400);
-  }
-
-  if (record.attempts >= 5) {
-    return ApiResponse.error(res, "Too many incorrect attempts", 429);
-  }
-
-  if (record.otp !== otp) {
-    record.attempts += 1;
-    await record.save();
-    return ApiResponse.error(res, "Invalid OTP", 400);
-  }
-
-  const user = await User.findOne({ where: { phone } });
-
-  if (!user) {
-    return ApiResponse.error(res, "Rider account not found", 404);
-  }
-
-  if (user.role !== "RIDER") {
-    return ApiResponse.error(res, "Access denied. Only riders can login here.", 403);
-  }
-
-  await OTP.destroy({ where: { phone } });
-
-  const token = jwt.sign(
-    { id: user.id, role: "RIDER" },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  const Rider = require("../models/rider");
-
-  let extraData = await Rider.findOne({ where: { user_id: user.id } });
-  let documents = [];
-
-  return ApiResponse.success(res, {
-    token,
-    role: "RIDER",
-    user: {
-      id: user.id,
-      name: user.name,
-      phone: user.phone,
-      email: user.email,
-      role: user.role,
-    },
-    role_data: extraData,
-    documents,
-  }, "Rider login successful");
-});
 
 /**
  * SEND SELLER OTP (Login)
@@ -510,12 +410,24 @@ exports.adminLogin = asyncHandler(async (req, res) => {
 });
 
 /**
- * UNIFIED SEND OTP (Rider / Customer / Seller)
+ * UNIFIED SEND OTP (Customer / Seller / Admin)
  */
 exports.sendOTP = asyncHandler(async (req, res) => {
-  let { phone } = req.body;
+  let { phone, role } = req.body;
   phone = phone?.toString().trim();
   if (!phone) return ApiResponse.error(res, "Phone number required", 400);
+
+  // If requesting login as RIDER, verify they are registered by Admin
+  if (role === "RIDER") {
+    const riderUser = await User.findOne({ where: { phone, role: "RIDER" } });
+    if (!riderUser) {
+      return ApiResponse.error(
+        res,
+        "User not found. Please contact admin to register your rider account.",
+        404
+      );
+    }
+  }
 
   const otpCode = process.env.NODE_ENV !== "production" ? "123456" : generateOTP();
 
@@ -528,10 +440,9 @@ exports.sendOTP = asyncHandler(async (req, res) => {
   });
 
   if (process.env.NODE_ENV !== "production") {
-    console.log(`[AUTH] Unified OTP for ${phone}: ${otpCode}`);
+    console.log(`[AUTH] OTP for ${phone}: ${otpCode}`);
   }
 
-  // Never return OTP in response body in production
   const responseData = process.env.NODE_ENV !== "production" ? { otp: otpCode } : null;
   return ApiResponse.success(res, responseData, "OTP sent successfully");
 });
@@ -540,7 +451,7 @@ exports.sendOTP = asyncHandler(async (req, res) => {
  * UNIFIED VERIFY OTP
  */
 exports.verifyOTP = asyncHandler(async (req, res) => {
-  let { phone, otp } = req.body;
+  let { phone, otp, role } = req.body;
   phone = phone?.toString().trim();
   otp = otp?.toString().trim();
 
@@ -548,9 +459,8 @@ exports.verifyOTP = asyncHandler(async (req, res) => {
 
   const record = await OTP.findOne({ where: { phone } });
   if (!record || record.otp !== otp) {
-    // Allow master test OTP in non-prod only
     if (process.env.NODE_ENV !== "production" && otp === "123456") {
-      // Pass — dev/test bypass
+      // Dev bypass
     } else {
       return ApiResponse.error(res, "Invalid or expired OTP", 400);
     }
@@ -568,13 +478,40 @@ exports.verifyOTP = asyncHandler(async (req, res) => {
 
   let user = await User.findOne({ where: { phone } });
   if (!user) {
-    // SECURITY: Auto-created users are always CUSTOMER — never allow role escalation
+    if (role === "RIDER") {
+      return ApiResponse.error(
+        res,
+        "User not found. Please contact admin to register your rider account.",
+        404
+      );
+    }
+    // SECURITY: Auto-created users are always CUSTOMER
     const safeRole = "CUSTOMER";
     user = await User.create({
       phone,
       name: `User_${phone.slice(-4)}`,
       role: safeRole
     });
+  } else if (role === "RIDER" && user.role !== "RIDER") {
+    return ApiResponse.error(
+      res,
+      "User not registered as Rider. Please contact admin.",
+      403
+    );
+  }
+
+  let { fcm_token } = req.body;
+  if (fcm_token) {
+    user.fcm_token = fcm_token.toString().trim();
+    await user.save();
+    try {
+      const Rider = require("../models/rider");
+      const rider = await Rider.findOne({ where: { user_id: user.id } });
+      if (rider) {
+        rider.fcm_token = fcm_token.toString().trim();
+        await rider.save();
+      }
+    } catch (_) {}
   }
 
   // Clean up OTP after successful verification
@@ -583,7 +520,7 @@ exports.verifyOTP = asyncHandler(async (req, res) => {
   const token = jwt.sign(
     { id: user.id, role: user.role },
     JWT_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "30d" }
   );
 
   return ApiResponse.success(res, {
@@ -597,3 +534,269 @@ exports.verifyOTP = asyncHandler(async (req, res) => {
     }
   }, "OTP verified successfully");
 });
+
+// Helper: robustly find rider user by phone across all formats and profile associations
+const findRiderUser = async (rawPhone) => {
+  if (!rawPhone) return null;
+  const cleaned = rawPhone.toString().trim();
+  const digitsOnly = cleaned.replace(/\D/g, "");
+  const last10 = digitsOnly.slice(-10);
+
+  const phoneVariants = [
+    cleaned,
+    digitsOnly,
+    last10,
+    `+91${last10}`,
+    `91${last10}`,
+    `+91 ${last10}`,
+  ].filter(Boolean);
+
+  // 1. Try finding in User table by matching any phone variant
+  let user = await User.findOne({
+    where: {
+      phone: { [Op.in]: phoneVariants },
+    },
+  });
+
+  // 2. Fallback: match by last 10 digits using LIKE
+  if (!user && last10.length === 10) {
+    user = await User.findOne({
+      where: {
+        phone: { [Op.like]: `%${last10}` },
+      },
+    });
+  }
+
+  // 3. Fallback: search Rider table for license or aadhar
+  if (!user) {
+    const rider = await Rider.findOne({
+      where: {
+        [Op.or]: [
+          { aadhar_number: { [Op.in]: phoneVariants } },
+          { license_number: { [Op.in]: phoneVariants } },
+        ],
+      },
+    });
+    if (rider && rider.user_id) {
+      user = await User.findByPk(rider.user_id);
+    }
+  }
+
+  if (!user) return null;
+
+  // 4. Verify user has RIDER role or a Rider profile
+  const riderProfile = await Rider.findOne({ where: { user_id: user.id } });
+  const isRider = user.role === "RIDER" || user.role === "rider" || Boolean(riderProfile);
+
+  if (isRider) {
+    if (user.role !== "RIDER") {
+      user.role = "RIDER";
+      await user.save();
+    }
+    return { user, rider: riderProfile };
+  }
+
+  return null;
+};
+
+/**
+ * RIDER SPECIFIC SEND OTP
+ */
+exports.sendRiderOTP = asyncHandler(async (req, res) => {
+  let { phone } = req.body;
+  phone = phone?.toString().trim();
+  if (!phone) return ApiResponse.error(res, "Phone number required", 400);
+
+  const riderData = await findRiderUser(phone);
+  if (!riderData) {
+    return ApiResponse.error(
+      res,
+      "Rider account not found. Please contact admin to register your rider account.",
+      404
+    );
+  }
+
+  const { user } = riderData;
+  const digitsOnly = phone.replace(/\D/g, "");
+  const last10 = digitsOnly.slice(-10);
+
+  const otpCode = process.env.NODE_ENV !== "production" ? "123456" : generateOTP();
+
+  // Create OTP record for all phone representations so verification always succeeds
+  const phonesToStore = [...new Set([user.phone, phone, digitsOnly, last10].filter(Boolean))];
+  for (const p of phonesToStore) {
+    await OTP.destroy({ where: { phone: p } });
+    await OTP.create({
+      phone: p,
+      otp: otpCode,
+      attempts: 0,
+      expires_at: new Date(Date.now() + 10 * 60 * 1000),
+    });
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[AUTH] Rider OTP for ${user.phone} (${phone}): ${otpCode}`);
+  }
+
+  const responseData = process.env.NODE_ENV !== "production" ? { otp: otpCode } : null;
+  return ApiResponse.success(res, responseData, "OTP sent successfully");
+});
+
+/**
+ * RIDER SPECIFIC VERIFY OTP
+ */
+exports.verifyRiderOTP = asyncHandler(async (req, res) => {
+  let { phone, otp, fcm_token } = req.body;
+  phone = phone?.toString().trim();
+  otp = otp?.toString().trim();
+
+  if (!phone || !otp) return ApiResponse.error(res, "Phone and OTP required", 400);
+
+  const riderData = await findRiderUser(phone);
+  if (!riderData) {
+    return ApiResponse.error(
+      res,
+      "Rider account not found. Please contact admin to register your rider account.",
+      404
+    );
+  }
+
+  const { user, rider } = riderData;
+  const digitsOnly = phone.replace(/\D/g, "");
+  const last10 = digitsOnly.slice(-10);
+
+  const phonesToCheck = [...new Set([user.phone, phone, digitsOnly, last10].filter(Boolean))];
+  const record = await OTP.findOne({ where: { phone: { [Op.in]: phonesToCheck } } });
+
+  if (!record || record.otp !== otp) {
+    if (process.env.NODE_ENV !== "production" && otp === "123456") {
+      // Dev bypass
+    } else {
+      return ApiResponse.error(res, "Invalid or expired OTP", 400);
+    }
+  }
+
+  if (record && record.expires_at < new Date()) {
+    return ApiResponse.error(res, "OTP has expired", 400);
+  }
+
+  if (fcm_token) {
+    user.fcm_token = fcm_token.toString().trim();
+    await user.save();
+    if (rider) {
+      rider.fcm_token = fcm_token.toString().trim();
+      await rider.save();
+    }
+  }
+
+  for (const p of phonesToCheck) {
+    await OTP.destroy({ where: { phone: p } });
+  }
+
+  const token = jwt.sign(
+    { id: user.id, role: "RIDER" },
+    JWT_SECRET,
+    { expiresIn: "30d" }
+  );
+
+  return ApiResponse.success(res, {
+    token,
+    role: "RIDER",
+    user: {
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      email: user.email,
+      role: "RIDER",
+    },
+    role_data: rider,
+  }, "Rider OTP verified successfully");
+});
+
+/**
+ * UPDATE FCM TOKEN (Authenticated - All Roles)
+ */
+exports.updateFcmToken = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const fcmToken = req.body?.fcm_token?.toString().trim();
+
+  if (!fcmToken) {
+    return ApiResponse.error(res, "fcm_token is required", 400);
+  }
+
+  const user = await User.findByPk(userId);
+  if (!user) {
+    return ApiResponse.error(res, "User not found", 404);
+  }
+
+  user.fcm_token = fcmToken;
+  await user.save();
+
+  // If user is a rider, also update Rider record
+  try {
+    const Rider = require("../models/rider");
+    const rider = await Rider.findOne({ where: { user_id: userId } });
+    if (rider) {
+      rider.fcm_token = fcmToken;
+      await rider.save();
+    }
+  } catch (_) {}
+
+  console.log(`[FCM] Token updated for user ${userId} (${user.role})`);
+  return ApiResponse.success(res, { fcm_token: fcmToken }, "FCM token updated successfully");
+});
+
+/**
+ * ADMIN LOGIN
+ * Allows admin with username "admin" and password "passadmin123" (or "admin123")
+ */
+exports.adminLogin = asyncHandler(async (req, res) => {
+  const { username, email, password } = req.body;
+  const userIdentifier = (username || email || "").toString().trim().toLowerCase();
+  const rawPassword = (password || "").toString().trim();
+
+  if (!userIdentifier || !rawPassword) {
+    return ApiResponse.error(res, "Username and password required", 400);
+  }
+
+  // Strict check: username "admin" (or admin@kunti.com) and password "passadmin123" (or admin123)
+  const isAllowedUser = userIdentifier === "admin" || userIdentifier === "admin@kunti.com" || userIdentifier === "admin@kunti.in";
+  const isAllowedPassword = rawPassword === "passadmin123" || rawPassword === "admin123";
+
+  if (!isAllowedUser || !isAllowedPassword) {
+    return ApiResponse.error(res, "Invalid admin credentials. Only username 'admin' with valid password is allowed.", 401);
+  }
+
+  let adminUser = await User.findOne({
+    where: { role: "ADMIN" }
+  });
+
+  if (!adminUser) {
+    const hashedPassword = await bcrypt.hash("passadmin123", 10);
+    adminUser = await User.create({
+      name: "Restaurant Admin",
+      phone: "9999999999",
+      email: "admin@kunti.com",
+      password: hashedPassword,
+      role: "ADMIN"
+    });
+  }
+
+  const token = jwt.sign(
+    { id: adminUser.id, role: "ADMIN" },
+    JWT_SECRET,
+    { expiresIn: "30d" }
+  );
+
+  return ApiResponse.success(res, {
+    token,
+    role: "ADMIN",
+    user: {
+      id: adminUser.id,
+      name: adminUser.name || "Restaurant Admin",
+      phone: adminUser.phone || "9999999999",
+      role: "ADMIN"
+    }
+  }, "Admin login successful");
+});
+

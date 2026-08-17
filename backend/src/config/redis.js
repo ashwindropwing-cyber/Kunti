@@ -1,5 +1,8 @@
 const redis = require("redis");
 
+let isRedisReady = false;
+let hasLoggedRedisError = false;
+
 const client = redis.createClient({
   url: process.env.REDIS_URL,
   socket: {
@@ -12,8 +15,6 @@ const client = redis.createClient({
     connectTimeout: 5000,
   }
 });
-
-let hasLoggedRedisError = false;
 
 client.on("ready", () => {
   isRedisReady = true;

@@ -796,21 +796,23 @@ exports.submitOrderReview = asyncHandler(async (req, res) => {
 
       if (pId) {
         // Find existing review from this user for this order/product to avoid duplicate inflation
-        let existingReview = null;
-        if (order) {
-          existingReview = await Review.findOne({
-            where: {
-              user_id: userId,
-              product_id: pId,
-              master_order_id: order.id,
-              review_type: "PRODUCT",
-            },
-          });
+        const reviewWhere = {
+          user_id: userId,
+          product_id: pId,
+          review_type: "PRODUCT",
+        };
+        if (order?.id) {
+          reviewWhere.master_order_id = order.id;
         }
+
+        const existingReview = await Review.findOne({ where: reviewWhere });
 
         if (existingReview) {
           existingReview.rating = rating;
           existingReview.comment = comment;
+          if (order?.id && !existingReview.master_order_id) {
+            existingReview.master_order_id = order.id;
+          }
           await existingReview.save();
         } else {
           await Review.create({
@@ -847,21 +849,23 @@ exports.submitOrderReview = asyncHandler(async (req, res) => {
     const rRating = Math.max(1, Math.min(5, parseFloat(riderRating) || 5.0));
     const rComment = riderComment || req.body.rider_comment || "";
 
-    let existingRiderReview = null;
-    if (order) {
-      existingRiderReview = await Review.findOne({
-        where: {
-          user_id: userId,
-          rider_id: targetRiderId,
-          master_order_id: order.id,
-          review_type: "RIDER",
-        },
-      });
+    const riderWhere = {
+      user_id: userId,
+      rider_id: targetRiderId,
+      review_type: "RIDER",
+    };
+    if (order?.id) {
+      riderWhere.master_order_id = order.id;
     }
+
+    const existingRiderReview = await Review.findOne({ where: riderWhere });
 
     if (existingRiderReview) {
       existingRiderReview.rating = rRating;
       existingRiderReview.comment = rComment;
+      if (order?.id && !existingRiderReview.master_order_id) {
+        existingRiderReview.master_order_id = order.id;
+      }
       await existingRiderReview.save();
     } else {
       await Review.create({

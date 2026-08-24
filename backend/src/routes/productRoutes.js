@@ -77,14 +77,11 @@ router.get(
 
 router.get(
   "/:id",
-  verifyToken,
   productController.getProductDetails
 );
 
 router.get(
   "/:id/reviews",
-  verifyToken,
-  allowRoles("CUSTOMER"),
   productController.getProductReviews
 );
 module.exports = router;

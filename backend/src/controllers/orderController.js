@@ -775,34 +775,57 @@ exports.cancelOrder = asyncHandler(async (req, res) => {
 
 // ─── SUBMIT ORDER REVIEW (CUSTOMER) ──────────────────────────────────────────
 exports.submitOrderReview = asyncHandler(async (req, res) => {
-  const orderId = req.params.id || req.body.order_id;
+  const orderId = req.params.id || req.body.order_id || req.body.orderId;
   const { productReviews, riderRating, riderComment } = req.body;
   const userId = req.user.id;
 
   let order = null;
   if (orderId) {
     order = await MasterOrder.findByPk(orderId);
+    if (!order) {
+      order = await MasterOrder.findOne({ where: { order_number: orderId } });
+    }
   }
 
-  // 1. Process Product Reviews
+  // 1. Process Product / Food Reviews
   if (productReviews && Array.isArray(productReviews)) {
     for (const rev of productReviews) {
       const pId = rev.productId || rev.product_id;
-      const rating = parseFloat(rev.rating) || 5.0;
+      const rating = Math.max(1, Math.min(5, parseFloat(rev.rating) || 5.0));
       const comment = rev.comment || rev.reviewText || "";
 
       if (pId) {
-        await Review.create({
-          user_id: userId,
-          product_id: pId,
-          rating,
-          comment,
-          review_type: "PRODUCT",
-        });
+        // Find existing review from this user for this order/product to avoid duplicate inflation
+        let existingReview = null;
+        if (order) {
+          existingReview = await Review.findOne({
+            where: {
+              user_id: userId,
+              product_id: pId,
+              master_order_id: order.id,
+              review_type: "PRODUCT",
+            },
+          });
+        }
 
-        // Recalculate Product average rating
+        if (existingReview) {
+          existingReview.rating = rating;
+          existingReview.comment = comment;
+          await existingReview.save();
+        } else {
+          await Review.create({
+            user_id: userId,
+            master_order_id: order ? order.id : null,
+            product_id: pId,
+            rating,
+            comment,
+            review_type: "PRODUCT",
+          });
+        }
+
+        // Recalculate Product average rating & count
         const allReviews = await Review.findAll({
-          where: { product_id: pId, review_type: "PRODUCT" },
+          where: { product_id: pId, review_type: "PRODUCT", is_hidden: false },
         });
         const totalRating = allReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
         const avg = allReviews.length > 0 ? (totalRating / allReviews.length) : rating;
@@ -818,19 +841,42 @@ exports.submitOrderReview = asyncHandler(async (req, res) => {
     }
   }
 
-  // 2. Process Rider Review
-  if (riderRating && order && order.rider_id) {
-    const rRating = parseFloat(riderRating);
-    await Review.create({
-      user_id: userId,
-      rider_id: order.rider_id,
-      rating: rRating,
-      comment: riderComment || "",
-      review_type: "RIDER",
-    });
+  // 2. Process Delivery Rider Review
+  const targetRiderId = order?.rider_id || req.body.rider_id || req.body.riderId;
+  if (riderRating && targetRiderId) {
+    const rRating = Math.max(1, Math.min(5, parseFloat(riderRating) || 5.0));
+    const rComment = riderComment || req.body.rider_comment || "";
 
+    let existingRiderReview = null;
+    if (order) {
+      existingRiderReview = await Review.findOne({
+        where: {
+          user_id: userId,
+          rider_id: targetRiderId,
+          master_order_id: order.id,
+          review_type: "RIDER",
+        },
+      });
+    }
+
+    if (existingRiderReview) {
+      existingRiderReview.rating = rRating;
+      existingRiderReview.comment = rComment;
+      await existingRiderReview.save();
+    } else {
+      await Review.create({
+        user_id: userId,
+        master_order_id: order ? order.id : null,
+        rider_id: targetRiderId,
+        rating: rRating,
+        comment: rComment,
+        review_type: "RIDER",
+      });
+    }
+
+    // Recalculate Rider average rating & count
     const allRiderReviews = await Review.findAll({
-      where: { rider_id: order.rider_id, review_type: "RIDER" },
+      where: { rider_id: targetRiderId, review_type: "RIDER", is_hidden: false },
     });
     const totalRiderRating = allRiderReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
     const avgRider = allRiderReviews.length > 0 ? (totalRiderRating / allRiderReviews.length) : rRating;
@@ -840,7 +886,7 @@ exports.submitOrderReview = asyncHandler(async (req, res) => {
         rating: parseFloat(avgRider.toFixed(1)),
         rating_count: allRiderReviews.length,
       },
-      { where: { id: order.rider_id } }
+      { where: { id: targetRiderId } }
     );
   }
 

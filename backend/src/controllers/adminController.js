@@ -588,40 +588,130 @@ exports.getAllReviews = asyncHandler(async (req, res) => {
 
   const authorIds = reviews.map(r => r.user_id).filter(Boolean);
   const riderIds = reviews.map(r => r.rider_id).filter(Boolean);
+  const productIds = reviews.map(r => r.product_id).filter(Boolean);
+  const orderIds = reviews.map(r => r.master_order_id).filter(Boolean);
 
-  const riders = await chunkedFindAll(Rider, "id", riderIds);
+  const [riders, products, orders, users] = await Promise.all([
+    chunkedFindAll(Rider, "id", riderIds),
+    chunkedFindAll(Product, "id", productIds),
+    chunkedFindAll(MasterOrder, "id", orderIds),
+    chunkedFindAll(User, "id", authorIds),
+  ]);
+
   const riderMap = riders.reduce((m, r) => { m[r.id] = r; return m; }, {});
+  const productMap = products.reduce((m, p) => { m[p.id] = p; return m; }, {});
+  const orderMap = orders.reduce((m, o) => { m[o.id] = o; return m; }, {});
 
+  // For riders, also get their User names
   const riderUserIds = riders.map(r => r.user_id).filter(Boolean);
-  const allUserIds = [...new Set([...authorIds, ...riderUserIds])];
-
-  const users = await chunkedFindAll(User, "id", allUserIds);
+  const riderUsers = await chunkedFindAll(User, "id", riderUserIds);
+  const riderUserMap = riderUsers.reduce((m, u) => { m[u.id] = u; return m; }, {});
   const userMap = users.reduce((m, u) => { m[u.id] = u; return m; }, {});
 
   const formatted = reviews.map((r) => {
     const reviewObj = typeof r.toJSON === 'function' ? r.toJSON() : { ...r };
     const authorUser = userMap[r.user_id] || null;
+    const productDoc = r.product_id ? productMap[r.product_id] : null;
+    const orderDoc = r.master_order_id ? orderMap[r.master_order_id] : null;
 
     let rider = null;
     if (r.rider_id) {
       const riderDoc = riderMap[r.rider_id];
       if (riderDoc) {
-        const riderUser = userMap[riderDoc.user_id];
+        const riderUser = riderUserMap[riderDoc.user_id];
         rider = {
           id: riderDoc.id,
-          name: riderUser?.name || null
+          name: riderUser?.name || "Rider",
+          phone: riderUser?.phone || null,
+          vehicle_type: riderDoc.vehicle_type || "Bike",
+          vehicle_number: riderDoc.vehicle_number || "",
         };
       }
     }
 
+    const orderNum = orderDoc?.order_number || (reviewObj.master_order_id ? `#${reviewObj.master_order_id.slice(0, 8)}` : "ORD-DIRECT");
+    const foodList = productDoc?.name ? [productDoc.name] : [];
+
     return {
-      ...reviewObj,
+      id: reviewObj.id,
+      rating: parseFloat(reviewObj.rating) || 5.0,
+      comment: reviewObj.comment || "",
+      review_type: reviewObj.review_type || (r.rider_id ? "RIDER" : "PRODUCT"),
+      admin_reply: reviewObj.admin_reply || null,
+      adminReply: reviewObj.admin_reply || null,
+      is_hidden: reviewObj.is_hidden || false,
+      isHidden: reviewObj.is_hidden || false,
+      createdAt: reviewObj.createdAt,
+      date: reviewObj.createdAt,
+      user_id: reviewObj.user_id,
+      product_id: reviewObj.product_id,
+      rider_id: reviewObj.rider_id,
+      master_order_id: reviewObj.master_order_id,
+      orderId: orderNum,
+      customerName: authorUser?.name || "Customer",
+      customerPhone: authorUser?.phone || "",
+      productName: productDoc?.name || null,
+      productImage: productDoc?.image_url || null,
+      riderName: rider?.name || null,
+      riderPhone: rider?.phone || null,
+      riderVehicle: rider ? `${rider.vehicle_type} ${rider.vehicle_number}`.trim() : null,
+      foodItems: foodList,
       Author: authorUser ? { id: authorUser.id, name: authorUser.name, phone: authorUser.phone } : null,
-      Rider: rider
+      Product: productDoc ? { id: productDoc.id, name: productDoc.name, image_url: productDoc.image_url, price: productDoc.price } : null,
+      Rider: rider,
+      Order: orderDoc ? { id: orderDoc.id, order_number: orderDoc.order_number } : null,
     };
   });
 
   return ApiResponse.success(res, formatted);
+});
+
+exports.replyToReview = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { reply, admin_reply } = req.body;
+  const text = reply !== undefined ? reply : admin_reply;
+
+  const review = await Review.findByPk(id);
+  if (!review) return ApiResponse.error(res, "Review not found", 404);
+
+  review.admin_reply = text || "";
+  await review.save();
+
+  return ApiResponse.success(res, review, "Reply saved successfully");
+});
+
+exports.toggleHideReview = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const review = await Review.findByPk(id);
+  if (!review) return ApiResponse.error(res, "Review not found", 404);
+
+  review.is_hidden = !review.is_hidden;
+  await review.save();
+
+  // Recalculate average ratings if hidden state changed
+  if (review.product_id && review.review_type === "PRODUCT") {
+    const allReviews = await Review.findAll({
+      where: { product_id: review.product_id, review_type: "PRODUCT", is_hidden: false },
+    });
+    const totalRating = allReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
+    const avg = allReviews.length > 0 ? (totalRating / allReviews.length) : 0;
+    await Product.update(
+      { rating: parseFloat(avg.toFixed(1)), rating_count: allReviews.length },
+      { where: { id: review.product_id } }
+    );
+  } else if (review.rider_id && review.review_type === "RIDER") {
+    const allRiderReviews = await Review.findAll({
+      where: { rider_id: review.rider_id, review_type: "RIDER", is_hidden: false },
+    });
+    const totalRiderRating = allRiderReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
+    const avgRider = allRiderReviews.length > 0 ? (totalRiderRating / allRiderReviews.length) : 5.0;
+    await Rider.update(
+      { rating: parseFloat(avgRider.toFixed(1)), rating_count: allRiderReviews.length },
+      { where: { id: review.rider_id } }
+    );
+  }
+
+  return ApiResponse.success(res, { is_hidden: review.is_hidden }, `Review ${review.is_hidden ? "hidden" : "unhidden"} successfully`);
 });
 
 exports.deleteReviewByAdmin = asyncHandler(async (req, res) => {
@@ -632,7 +722,35 @@ exports.deleteReviewByAdmin = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Review not found", 404);
   }
 
+  const pId = review.product_id;
+  const rId = review.rider_id;
+  const revType = review.review_type;
+
   await review.destroy();
+
+  // Recalculate rating
+  if (pId && revType === "PRODUCT") {
+    const allReviews = await Review.findAll({
+      where: { product_id: pId, review_type: "PRODUCT", is_hidden: false },
+    });
+    const totalRating = allReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
+    const avg = allReviews.length > 0 ? (totalRating / allReviews.length) : 0;
+    await Product.update(
+      { rating: parseFloat(avg.toFixed(1)), rating_count: allReviews.length },
+      { where: { id: pId } }
+    );
+  } else if (rId && revType === "RIDER") {
+    const allRiderReviews = await Review.findAll({
+      where: { rider_id: rId, review_type: "RIDER", is_hidden: false },
+    });
+    const totalRiderRating = allRiderReviews.reduce((sum, r) => sum + (parseFloat(r.rating) || 0), 0);
+    const avgRider = allRiderReviews.length > 0 ? (totalRiderRating / allRiderReviews.length) : 5.0;
+    await Rider.update(
+      { rating: parseFloat(avgRider.toFixed(1)), rating_count: allRiderReviews.length },
+      { where: { id: rId } }
+    );
+  }
+
   return ApiResponse.success(res, null, "Review deleted successfully");
 });
 

@@ -165,6 +165,31 @@ const initDb = async () => {
 
     // Sync database schema
     await sequelize.sync();
+
+    // Ensure review columns exist for existing databases
+    try {
+      const queryInterface = sequelize.getQueryInterface();
+      const tableInfo = await queryInterface.describeTable("reviews").catch(() => ({}));
+      if (!tableInfo.master_order_id) {
+        await queryInterface.addColumn("reviews", "master_order_id", {
+          type: require("sequelize").DataTypes.UUID,
+          allowNull: true,
+        }).catch(() => {});
+      }
+      if (!tableInfo.admin_reply) {
+        await queryInterface.addColumn("reviews", "admin_reply", {
+          type: require("sequelize").DataTypes.TEXT,
+          allowNull: true,
+        }).catch(() => {});
+      }
+      if (!tableInfo.is_hidden) {
+        await queryInterface.addColumn("reviews", "is_hidden", {
+          type: require("sequelize").DataTypes.BOOLEAN,
+          defaultValue: false,
+        }).catch(() => {});
+      }
+    } catch (_) {}
+
     console.log("SQL Database schema synced ✅");
 
     // Seed default platform settings once on startup

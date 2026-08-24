@@ -330,22 +330,37 @@ exports.getRiderReviews = asyncHandler(async (req, res) => {
   if (!rider) return ApiResponse.error(res, "Rider not found", 404);
 
   const reviews = await Review.findAll({
-    where: { rider_id: rider.id, review_type: "RIDER" },
+    where: { rider_id: rider.id, review_type: "RIDER", is_hidden: false },
     order: [["createdAt", "DESC"]]
   });
 
   const userIds = reviews.map((r) => r.user_id).filter(Boolean);
-  const users = await chunkedFindAll(User, "id", userIds);
+  const orderIds = reviews.map((r) => r.master_order_id).filter(Boolean);
+
+  const [users, orders] = await Promise.all([
+    chunkedFindAll(User, "id", userIds),
+    chunkedFindAll(MasterOrder, "id", orderIds),
+  ]);
+
   const userMap = users.reduce((m, u) => {
     m[u.id] = u;
+    return m;
+  }, {});
+
+  const orderMap = orders.reduce((m, o) => {
+    m[o.id] = o;
     return m;
   }, {});
 
   const formatted = reviews.map((r) => {
     const reviewObj = typeof r.toJSON === 'function' ? r.toJSON() : { ...r };
     const user = userMap[r.user_id];
+    const order = r.master_order_id ? orderMap[r.master_order_id] : null;
+
     return {
       ...reviewObj,
+      customer_name: user?.name || "Valued Customer",
+      order_number: order?.order_number || (r.master_order_id ? `#${r.master_order_id.slice(0, 8)}` : null),
       User: user ? { name: user.name } : null
     };
   });

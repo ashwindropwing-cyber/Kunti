@@ -68,8 +68,17 @@ Wishlist.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 User.hasMany(Review, { foreignKey: "user_id", as: "reviews" });
 Review.belongsTo(User, { foreignKey: "user_id", as: "user" });
 
+// Product <-> Review
+Product.hasMany(Review, { foreignKey: "product_id", as: "reviews" });
 Review.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
+// Rider <-> Review
+Rider.hasMany(Review, { foreignKey: "rider_id", as: "reviews" });
 Review.belongsTo(Rider, { foreignKey: "rider_id", as: "rider" });
+
+// MasterOrder <-> Review
+MasterOrder.hasMany(Review, { foreignKey: "master_order_id", as: "reviews" });
+Review.belongsTo(MasterOrder, { foreignKey: "master_order_id", as: "order" });
 
 // Coupon <-> CouponUsage <-> User / MasterOrder
 User.hasMany(CouponUsage, { foreignKey: "user_id", as: "coupon_usages" });

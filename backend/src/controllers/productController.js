@@ -305,7 +305,7 @@ exports.getProductReviews = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const reviews = await Review.findAll({
-    where: { product_id: id, review_type: "PRODUCT" },
+    where: { product_id: id, review_type: "PRODUCT", is_hidden: false },
     order: [["createdAt", "DESC"]]
   });
 

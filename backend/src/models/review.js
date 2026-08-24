@@ -13,6 +13,10 @@ const Review = sequelize.define(
       type: DataTypes.UUID,
       allowNull: false,
     },
+    master_order_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
     product_id: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -32,6 +36,14 @@ const Review = sequelize.define(
     review_type: {
       type: DataTypes.STRING,
       defaultValue: "PRODUCT", // 'PRODUCT' or 'RIDER'
+    },
+    admin_reply: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    is_hidden: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
     },
   },
   {

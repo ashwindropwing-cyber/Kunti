@@ -152,8 +152,28 @@ router.get(
   verifyToken,
   allowRoles("ADMIN"),
   heavyReadLimiter,
-  cacheFor(30),
   adminController.getAllReviews
+);
+
+router.post(
+  "/reviews/:id/reply",
+  verifyToken,
+  allowRoles("ADMIN"),
+  adminController.replyToReview
+);
+
+router.patch(
+  "/reviews/:id/reply",
+  verifyToken,
+  allowRoles("ADMIN"),
+  adminController.replyToReview
+);
+
+router.patch(
+  "/reviews/:id/toggle-hide",
+  verifyToken,
+  allowRoles("ADMIN"),
+  adminController.toggleHideReview
 );
 
 router.delete(

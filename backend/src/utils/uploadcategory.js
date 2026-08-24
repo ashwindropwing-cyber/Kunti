@@ -9,14 +9,13 @@ const storage = new CloudinaryStorage({
     allowed_formats: ["jpg", "png", "jpeg", "webp"],
     transformation: [
       {
-        width: 800,
-        height: 800,
+        width: 500,
+        height: 500,
         crop: "fill",
         gravity: "center",
         quality: "auto",
         fetch_format: "auto",
-        radius: 50,
-        aspect_ratio:"1:1"
+        aspect_ratio: "1:1"
       }
     ]
   })

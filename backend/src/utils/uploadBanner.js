@@ -11,12 +11,12 @@ const storage = new CloudinaryStorage({
     transformation: [
       {
         width: 1200,
-        height: 600,
-        crop: "fill",      // ensures exact size
-        gravity: "auto",   // smart crop
+        height: 500,
+        crop: "fill",      // ensures exact size matching customer app carousel
+        gravity: "auto",   // smart subject detection
         quality: "auto",
         fetch_format: "auto",
-        aspect_ratio: "2:1"
+        aspect_ratio: "2.4:1"
       }
     ]
   }

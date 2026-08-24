@@ -7,7 +7,17 @@ const storage = new CloudinaryStorage({
   params: {
     folder: "tind_products",
     allowed_formats: ["jpg", "png", "jpeg", "webp"],
-    transformation: [{ width: 1200, height: 1200, crop: "limit", quality: "auto", fetch_format: "auto" }]
+    transformation: [
+      {
+        width: 800,
+        height: 800,
+        crop: "fill",
+        gravity: "auto",
+        quality: "auto",
+        fetch_format: "auto",
+        aspect_ratio: "1:1"
+      }
+    ]
   },
 });
 

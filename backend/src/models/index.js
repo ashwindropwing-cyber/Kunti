@@ -105,6 +105,7 @@ module.exports = {
   PlatformSettings,
   Wishlist,
   Otp,
+  OTP: Otp,
   Review,
   Coupon,
   CouponUsage,

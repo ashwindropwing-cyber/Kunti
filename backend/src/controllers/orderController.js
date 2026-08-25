@@ -3,10 +3,12 @@ const { MasterOrder, OrderItem, Cart, CartItem, Product, User, CustomerAddress, 
 const razorpay = require("../config/razorpay");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
+const cacheService = require("../services/cacheService");
 const { calculateRoadDistance } = require("../utils/geoUtils");
 const { getPlatformSettingsMap } = require("./platformController");
 const { validateCoupon } = require("./couponController");
 const { notifyAdmin, notifyRider, notifyCustomer } = require("../utils/fcmService");
+
 
 // Helper: Generate unique order number (e.g., KUNTI-100234)
 function generateOrderNumber() {
@@ -209,10 +211,15 @@ exports.createOrder = asyncHandler(async (req, res) => {
     return masterOrder;
   });
 
+  if (appliedCoupon) {
+    await cacheService.delPattern("coupons*");
+  }
+
   // Return created order with items
   const createdOrder = await MasterOrder.findByPk(result.id, {
     include: [{ model: OrderItem, as: "items" }],
   });
+
 
   let razorpayOrderId = null;
   let paymentRequired = false;
@@ -307,6 +314,7 @@ exports.getOrderTracking = asyncHandler(async (req, res) => {
     order_id: order.id,
     order_number: order.order_number,
     status: order.status,
+    delivery_otp: order.delivery_otp,
     payment_status: order.payment_status,
     payment_method: order.payment_method,
     total_amount: order.total_amount,
@@ -320,6 +328,7 @@ exports.getOrderTracking = asyncHandler(async (req, res) => {
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
   });
+
 });
 
 // ─── UPDATE ORDER STATUS (ADMIN) ──────────────────────────────────────────────
@@ -342,12 +351,45 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Dine-in orders cannot be set to OUT_FOR_DELIVERY", 400);
   }
 
+  const previousStatus = order.status;
   order.status = status;
   if (status === "DELIVERED" && order.payment_method === "COD") {
     order.payment_status = "PAID";
     order.is_paid = true;
   }
   await order.save();
+
+  if (status === "CANCELLED" && previousStatus !== "CANCELLED") {
+    // Restore Stock
+    const orderItems = await OrderItem.findAll({
+      where: { master_order_id: order.id },
+    });
+    for (const item of orderItems) {
+      await Product.increment("stock_quantity", {
+        by: item.quantity,
+        where: { id: item.product_id },
+      });
+    }
+
+    // Restore Coupon Usage if a coupon was used
+    if (order.coupon_code) {
+      const coupon = await Coupon.findOne({
+        where: { code: order.coupon_code.toUpperCase().trim() },
+      });
+      if (coupon) {
+        await CouponUsage.destroy({
+          where: { master_order_id: order.id, user_id: order.user_id },
+        });
+        if (coupon.used_count > 0) {
+          await Coupon.decrement("used_count", {
+            by: 1,
+            where: { id: coupon.id },
+          });
+        }
+      }
+      await cacheService.delPattern("coupons*");
+    }
+  }
 
   if (status === "DELIVERED") {
     notifyAdmin({
@@ -366,6 +408,7 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, order, `Order status updated to ${status}`);
 });
+
 
 
 // ─── ASSIGN RIDER (ADMIN - SINGLE ORDER) ──────────────────────────────────────────────
@@ -621,10 +664,36 @@ exports.cancelOrder = asyncHandler(async (req, res) => {
         transaction: t,
       });
     }
+
+    // Restore Coupon Usage if a coupon was used on this order
+    if (order.coupon_code) {
+      const coupon = await Coupon.findOne({
+        where: { code: order.coupon_code.toUpperCase().trim() },
+        transaction: t,
+      });
+      if (coupon) {
+        await CouponUsage.destroy({
+          where: { master_order_id: order.id, user_id: order.user_id },
+          transaction: t,
+        });
+        if (coupon.used_count > 0) {
+          await Coupon.decrement("used_count", {
+            by: 1,
+            where: { id: coupon.id },
+            transaction: t,
+          });
+        }
+      }
+    }
   });
+
+  if (order.coupon_code) {
+    await cacheService.delPattern("coupons*");
+  }
 
   return ApiResponse.success(res, order, "Order cancelled successfully");
 });
+
 
 // ─── RIDER UPDATE SINGLE ORDER STATUS ────────────────────────────────────────
 exports.riderUpdateOrderStatus = asyncHandler(async (req, res) => {
@@ -765,6 +834,25 @@ exports.cancelOrder = asyncHandler(async (req, res) => {
     }
   }
 
+  // Restore Coupon Usage if a coupon was used
+  if (order.coupon_code) {
+    const coupon = await Coupon.findOne({
+      where: { code: order.coupon_code.toUpperCase().trim() },
+    });
+    if (coupon) {
+      await CouponUsage.destroy({
+        where: { master_order_id: order.id, user_id: order.user_id },
+      });
+      if (coupon.used_count > 0) {
+        await Coupon.decrement("used_count", {
+          by: 1,
+          where: { id: coupon.id },
+        });
+      }
+    }
+    await cacheService.delPattern("coupons*");
+  }
+
   order.status = "CANCELLED";
   order.cancel_reason = cancel_reason || "Cancelled by user";
   order.cancelled_by = userRole;
@@ -772,6 +860,7 @@ exports.cancelOrder = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, order.toJSON(), "Order cancelled successfully");
 });
+
 
 // ─── SUBMIT ORDER REVIEW (CUSTOMER) ──────────────────────────────────────────
 exports.submitOrderReview = asyncHandler(async (req, res) => {

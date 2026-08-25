@@ -1,8 +1,10 @@
 process.env.NODE_ENV = "test";
+process.env.USE_SQLITE = "true";
+process.env.DB_DIALECT = "sqlite";
 require("dotenv").config();
 const http = require("http");
 const app = require("./src/app");
-const { User, Rider, Category, Product, Banner, Coupon, MasterOrder, sequelize } = require("./src/models");
+const { User, Rider, OTP, Category, Product, Banner, Coupon, MasterOrder, CustomerAddress, Cart, CartItem, sequelize } = require("./src/models");
 const bcrypt = require("bcryptjs");
 
 const PORT = 5001; // Separate test port
@@ -10,10 +12,15 @@ const PORT = 5001; // Separate test port
 let server;
 let adminToken = "";
 let riderToken = "";
+let customerToken = "";
+let sampleCategoryId = "";
+let sampleProductId = "";
+let sampleAddressId = "";
 
-// Helper to make HTTP requests
+// Helper to make HTTP requests and measure response time
 function makeRequest(method, path, body = null, token = null) {
   return new Promise((resolve) => {
+    const startTime = process.hrtime();
     const options = {
       hostname: "localhost",
       port: PORT,
@@ -33,16 +40,23 @@ function makeRequest(method, path, body = null, token = null) {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
+        const diff = process.hrtime(startTime);
+        const durationMs = parseFloat((diff[0] * 1e3 + diff[1] * 1e-6).toFixed(2));
         let parsed = data;
         try {
           parsed = JSON.parse(data);
         } catch (e) {}
-        resolve({ statusCode: res.statusCode, body: parsed });
+        resolve({
+          statusCode: res.statusCode,
+          headers: res.headers,
+          durationMs,
+          body: parsed
+        });
       });
     });
 
     req.on("error", (err) => {
-      resolve({ statusCode: 500, body: { error: err.message } });
+      resolve({ statusCode: 500, durationMs: 0, body: { error: err.message } });
     });
 
     if (body) {
@@ -53,11 +67,11 @@ function makeRequest(method, path, body = null, token = null) {
 }
 
 async function runTests() {
-  console.log("==========================================");
-  console.log("  KUNTI BACKEND API COMPREHENSIVE TEST   ");
-  console.log("==========================================");
+  console.log("===============================================================");
+  console.log("  KUNTI BACKEND: COMPREHENSIVE API TEST & LATENCY BENCHMARK   ");
+  console.log("===============================================================");
 
-  // Initialize DB sequentially
+  // Initialize DB
   try {
     await app.initDb();
     console.log("✅ Database initialized successfully.");
@@ -65,17 +79,26 @@ async function runTests() {
     console.error("⚠️ DB init notice:", err.message);
   }
 
-  // Seed essential accounts for testing if missing
+  // Seed essential test accounts
   const hashedPassword = await bcrypt.hash("admin123", 10);
 
   const [adminUser] = await User.findOrCreate({
     where: { phone: "9999999999" },
     defaults: { name: "Test Admin", email: "admin@kunti.com", password: hashedPassword, role: "ADMIN" }
   });
+  adminUser.password = hashedPassword;
+  adminUser.role = "ADMIN";
+  await adminUser.save();
+
 
   const [riderUser] = await User.findOrCreate({
     where: { phone: "8800000000" },
     defaults: { name: "Test Rider", email: "rider@kunti.com", password: hashedPassword, role: "RIDER" }
+  });
+
+  const [custUser] = await User.findOrCreate({
+    where: { phone: "7700000000" },
+    defaults: { name: "Test Customer", email: "customer@kunti.com", password: hashedPassword, role: "CUSTOMER" }
   });
 
   await Rider.findOrCreate({
@@ -97,70 +120,128 @@ async function runTests() {
     let token = null;
     if (useAuth === "admin") token = adminToken;
     if (useAuth === "rider") token = riderToken;
+    if (useAuth === "customer") token = customerToken;
 
     const res = await makeRequest(method, path, body, token);
     const passed = res.statusCode >= 200 && res.statusCode < 400;
-    results.push({ name, method, path, status: res.statusCode, passed, response: res.body });
+    results.push({
+      name,
+      method,
+      path,
+      status: res.statusCode,
+      passed,
+      durationMs: res.durationMs,
+      response: res.body
+    });
     const icon = passed ? "✅" : "❌";
-    console.log(`${icon} [${res.statusCode}] ${method} ${path} - ${name}`);
+    console.log(`${icon} [${res.statusCode}] ${method} ${path.padEnd(35)} — ${name} (${res.durationMs}ms)`);
     if (!passed) {
       console.log("   --> Error Body:", JSON.stringify(res.body));
     }
+    return res;
   }
 
-  // 1. Health Check
-  await test("Health Check", "GET", "/api/health");
+  // 1. Health Check & Cache Metrics
+  await test("Health Check & Cache Stats", "GET", "/api/health");
 
   // 2. Auth APIs
-  await test("Send OTP", "POST", "/api/auth/send-otp", { phone: "9999999999" });
-  await test("Verify OTP", "POST", "/api/auth/verify-otp", { phone: "9999999999", otp: "123456" });
+  await test("Customer Send OTP", "POST", "/api/auth/send-otp", { phone: "7700000000" });
+  const custOtpDoc = await OTP.findOne({ where: { phone: "7700000000" } });
+  const custLoginRes = await test("Customer Verify OTP", "POST", "/api/auth/verify-otp", { phone: "7700000000", otp: custOtpDoc ? custOtpDoc.otp : "123456" });
+  if (custLoginRes.body && custLoginRes.body.token) customerToken = custLoginRes.body.token;
+  else if (custLoginRes.body?.data?.token) customerToken = custLoginRes.body.data.token;
 
-  // Admin Login to get Token
-  const adminLoginRes = await makeRequest("POST", "/api/auth/admin/login", { email: "admin@kunti.com", password: "admin123" });
-  if (adminLoginRes.body && adminLoginRes.body.token) {
-    adminToken = adminLoginRes.body.token;
-    console.log("🔑 Admin Token obtained.");
-  } else if (adminLoginRes.body && adminLoginRes.body.data && adminLoginRes.body.data.token) {
-    adminToken = adminLoginRes.body.data.token;
-    console.log("🔑 Admin Token obtained.");
-  }
+  // Admin Login
+  const adminLoginRes = await test("Admin Login", "POST", "/api/auth/admin/login", { email: "admin@kunti.com", password: "admin123" });
+  if (adminLoginRes.body && adminLoginRes.body.token) adminToken = adminLoginRes.body.token;
+  else if (adminLoginRes.body?.data?.token) adminToken = adminLoginRes.body.data.token;
 
-  // Rider Login to get Token
+  // Rider Login
   await makeRequest("POST", "/api/auth/send-otp", { phone: "8800000000" });
-  const riderLoginRes = await makeRequest("POST", "/api/auth/verify-otp", { phone: "8800000000", otp: "123456", role: "RIDER" });
-  if (riderLoginRes.body && riderLoginRes.body.token) {
-    riderToken = riderLoginRes.body.token;
-    console.log("🔑 Rider Token obtained.");
-  } else if (riderLoginRes.body && riderLoginRes.body.data && riderLoginRes.body.data.token) {
-    riderToken = riderLoginRes.body.data.token;
-    console.log("🔑 Rider Token obtained.");
+  const riderOtpDoc = await OTP.findOne({ where: { phone: "8800000000" } });
+  const riderLoginRes = await test("Rider Verify OTP", "POST", "/api/auth/verify-otp", { phone: "8800000000", otp: riderOtpDoc ? riderOtpDoc.otp : "123456", role: "RIDER" });
+  if (riderLoginRes.body && riderLoginRes.body.token) riderToken = riderLoginRes.body.token;
+  else if (riderLoginRes.body?.data?.token) riderToken = riderLoginRes.body.data.token;
+
+
+  // 3. Platform Settings APIs
+  await test("Get Public Settings (Miss)", "GET", "/api/platform/public-settings");
+  await test("Get Public Settings (Hit)", "GET", "/api/platform/public-settings");
+  await test("Get Admin Settings", "GET", "/api/platform/settings", null, "admin");
+
+  // 4. Category APIs
+  const catCreateRes = await test("Create Category", "POST", "/api/categories", { name: "Rolls & Wraps", display_order: 1 }, "admin");
+  if (catCreateRes.body?.id) sampleCategoryId = catCreateRes.body.id;
+
+  await test("Get Categories (Miss)", "GET", "/api/categories");
+  await test("Get Categories (Hit - L1/L2)", "GET", "/api/categories");
+  await test("Get Categories All (Admin)", "GET", "/api/categories?all=true", null, "admin");
+
+  // 5. Product APIs
+  const prodCreateRes = await test("Create Product", "POST", "/api/products", {
+    name: "Classic Kolkata Egg Roll",
+    description: "Delicious freshly made roll with eggs and onions",
+    category_id: sampleCategoryId,
+    price: 120,
+    discount_price: 99,
+    food_type: "egg",
+    is_available: true,
+  }, "admin");
+  if (prodCreateRes.body?.product?.id) sampleProductId = prodCreateRes.body.product.id;
+
+  await test("Get Products (Miss)", "GET", "/api/products");
+  await test("Get Products (Hit - L1/L2)", "GET", "/api/products");
+
+  if (sampleProductId) {
+    await test("Get Product Details (Miss)", "GET", `/api/products/${sampleProductId}`);
+    await test("Get Product Details (Hit)", "GET", `/api/products/${sampleProductId}`);
+    await test("Get Product Reviews", "GET", `/api/products/${sampleProductId}/reviews`);
+    await test("Toggle Product Active Status", "PUT", `/api/products/${sampleProductId}/toggle`, null, "admin");
   }
 
-  // 3. Category APIs
-  await test("Get Categories", "GET", "/api/categories");
-  await test("Create Category", "POST", "/api/categories", { name: "Test Category", banner_image: "https://via.placeholder.com/150" }, "admin");
+  // 6. Banner APIs
+  await test("Create Banner", "POST", "/api/banners", { title: "Special Discount", image_url: "https://via.placeholder.com/600x300", display_order: 1 }, "admin");
+  await test("Get Active Banners (Miss)", "GET", "/api/banners");
+  await test("Get Active Banners (Hit - L1/L2)", "GET", "/api/banners");
+  await test("Get All Banners (Admin)", "GET", "/api/banners/admin", null, "admin");
 
-  // 4. Product APIs
-  await test("Get Products", "GET", "/api/products");
+  // 7. Coupon APIs
+  const couponCode = "KUNTI50_" + Date.now().toString().slice(-4);
+  await test("Create Coupon", "POST", "/api/coupons", { code: couponCode, discountPercent: 20, minOrderValue: 150 }, "admin");
+  await test("Get All Coupons (Admin)", "GET", "/api/coupons", null, "admin");
+  await test("Get Available Coupons (Customer)", "GET", "/api/coupons/available", null, "customer");
 
-  // 5. Banner APIs
-  await test("Get Banners", "GET", "/api/banners");
-  await test("Create Banner", "POST", "/api/banners", { title: "Test Banner", image_url: "https://via.placeholder.com/300" }, "admin");
+  // 8. Customer Address & Cart APIs
+  const addrRes = await test("Create Customer Address", "POST", "/api/address", {
+    address_type: "HOME",
+    address_line1: "Flat 402, Green Enclave",
+    address_line2: "Salt Lake Sector 5",
+    city: "Kolkata",
+    pincode: "700091",
+    latitude: 22.5726,
+    longitude: 88.3639,
+  }, "customer");
+  if (addrRes.body?.id) sampleAddressId = addrRes.body.id;
+  else if (addrRes.body?.data?.id) sampleAddressId = addrRes.body.data.id;
 
-  // 6. Coupon APIs
-  await test("Get Coupons", "GET", "/api/coupons", null, "admin");
-  await test("Create Coupon", "POST", "/api/coupons", { code: "TEST50_" + Date.now(), discountPercent: 50, minOrderValue: 100 }, "admin");
+  await test("Get Customer Addresses", "GET", "/api/address", null, "customer");
 
-  // 7. Rider APIs
+  if (sampleProductId) {
+    await test("Add Product to Cart", "POST", "/api/cart/add", { product_id: sampleProductId, quantity: 2 }, "customer");
+    await test("Get Cart", "GET", "/api/cart", null, "customer");
+  }
+
+  // 9. Rider APIs
   await test("Get Rider Profile", "GET", "/api/rider/profile", null, "rider");
-  await test("Toggle Rider Status", "POST", "/api/rider/toggle-status", { is_available: true, latitude: 12.9716, longitude: 77.5946 }, "rider");
+  await test("Toggle Rider Status", "POST", "/api/rider/toggle-status", { is_available: true, latitude: 22.5726, longitude: 88.3639 }, "rider");
   await test("Get Available Orders for Rider", "GET", "/api/rider/available-orders", null, "rider");
   await test("Get Active Orders for Rider", "GET", "/api/rider/active-orders", null, "rider");
   await test("Get Rider Earnings", "GET", "/api/rider/earnings", null, "rider");
   await test("Get Rider Order History", "GET", "/api/rider/history", null, "rider");
 
-  // 8. Admin APIs
-  await test("Get Admin Dashboard", "GET", "/api/admin/dashboard", null, "admin");
+  // 10. Admin Dashboard & Operations APIs
+  await test("Get Admin Dashboard (Miss)", "GET", "/api/admin/dashboard", null, "admin");
+  await test("Get Admin Dashboard (Hit)", "GET", "/api/admin/dashboard", null, "admin");
   await test("Get Admin Store Settings", "GET", "/api/admin/store-settings", null, "admin");
   await test("Get Admin Riders List", "GET", "/api/admin/riders", null, "admin");
   await test("Get Admin Customers List", "GET", "/api/admin/customers", null, "admin");
@@ -170,9 +251,18 @@ async function runTests() {
   server.close();
 
   const totalPassed = results.filter((r) => r.passed).length;
-  console.log("\n==========================================");
-  console.log(`  TEST RESULTS: ${totalPassed} / ${results.length} PASSED`);
-  console.log("==========================================");
+  const avgLatency = (results.reduce((s, r) => s + r.durationMs, 0) / results.length).toFixed(2);
+  const cacheHitTests = results.filter(r => r.name.includes("(Hit"));
+  const avgHitLatency = cacheHitTests.length > 0
+    ? (cacheHitTests.reduce((s, r) => s + r.durationMs, 0) / cacheHitTests.length).toFixed(2)
+    : "N/A";
+
+  console.log("\n===============================================================");
+  console.log(`  BENCHMARK SUMMARY & TEST RESULTS: ${totalPassed} / ${results.length} PASSED`);
+  console.log(`  Average Overall Latency: ${avgLatency} ms`);
+  console.log(`  Average Cache-Hit Latency (L1/L2): ${avgHitLatency} ms ⚡`);
+  console.log("===============================================================");
 }
 
 runTests();
+

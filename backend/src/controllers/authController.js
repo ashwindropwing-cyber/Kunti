@@ -36,9 +36,7 @@ exports.sendRegisterOTP = asyncHandler(async (req, res) => {
   if (existingUser) return ApiResponse.error(res, "User already exists", 400);
 
   const otpCode = generateOTP();
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`[AUTH] OTP for ${phone}: ${otpCode}`);
-  }
+  console.log(`[AUTH] 🔑 Register OTP for ${phone}: ${otpCode}`);
 
   await OTP.destroy({ where: { phone } });
   await OTP.create({
@@ -48,10 +46,11 @@ exports.sendRegisterOTP = asyncHandler(async (req, res) => {
     expires_at: new Date(Date.now() + 5 * 60 * 1000),
   });
 
-  await sendSMS(phone, `Your TIND registration OTP is ${otpCode}`);
+  await sendSMS(phone, `Your Kunti registration OTP is ${otpCode}. Valid for 5 minutes.`);
 
   return ApiResponse.success(res, null, "OTP sent successfully");
 });
+
 
 /**
  * VERIFY REGISTER OTP
@@ -200,9 +199,7 @@ exports.sendSellerOTP = asyncHandler(async (req, res) => {
   }
 
   const otpCode = generateOTP();
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`[AUTH] Register OTP for ${phone}: ${otpCode}`);
-  }
+  console.log(`[AUTH] 🔑 Seller Login OTP for ${phone}: ${otpCode}`);
 
   await OTP.destroy({ where: { phone } });
   await OTP.create({
@@ -212,10 +209,11 @@ exports.sendSellerOTP = asyncHandler(async (req, res) => {
     expires_at: new Date(Date.now() + 5 * 60 * 1000),
   });
 
-  await sendSMS(phone, `Your TIND seller login OTP is ${otpCode}. Valid for 5 minutes.`);
+  await sendSMS(phone, `Your Kunti seller login OTP is ${otpCode}. Valid for 5 minutes.`);
 
   return ApiResponse.success(res, null, "OTP sent to seller");
 });
+
 
 /**
  * VERIFY SELLER OTP (Login)
@@ -292,9 +290,7 @@ exports.forgotPassword = asyncHandler(async (req, res) => {
   }
 
   const otpCode = generateOTP();
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`[AUTH] Forgot Password OTP for ${phone}: ${otpCode}`);
-  }
+  console.log(`[AUTH] 🔑 Forgot Password OTP for ${phone}: ${otpCode}`);
 
   await OTP.destroy({ where: { phone } });
   await OTP.create({
@@ -304,10 +300,11 @@ exports.forgotPassword = asyncHandler(async (req, res) => {
     expires_at: new Date(Date.now() + 5 * 60 * 1000),
   });
 
-  await sendSMS(phone, `Reset OTP: ${otpCode}. Valid for 5 minutes.`);
+  await sendSMS(phone, `Your Kunti password reset OTP is ${otpCode}. Valid for 5 minutes.`);
 
   return ApiResponse.success(res, null, "OTP sent for password reset");
 });
+
 
 /**
  * RESET PASSWORD
@@ -361,39 +358,45 @@ exports.resetPassword = asyncHandler(async (req, res) => {
  * ADMIN LOGIN (by Email or Phone + Password)
  */
 exports.adminLogin = asyncHandler(async (req, res) => {
-  let { email, phone, password } = req.body;
-  email = email?.toString().trim();
-  phone = phone?.toString().trim();
+  let { email, username, phone, password } = req.body;
+  const identifier = (email || username || phone || "").toString().trim();
+  const rawPassword = (password || "").toString().trim();
 
-  if ((!email && !phone) || !password) {
-    return ApiResponse.error(res, "Email/phone and password required", 400);
+  if (!identifier || !rawPassword) {
+    return ApiResponse.error(res, "Email/username and password required", 400);
   }
 
   const { Op } = require("sequelize");
-  const whereClause = email
-    ? {
-      [Op.or]: [
-        { email: email },
-        { email: `${email}@dropwinggroups.com` },
-        { phone: email }
-      ]
-    }
-    : { phone };
-  const user = await User.findOne({ where: whereClause });
+  const whereClause = {
+    role: "ADMIN",
+    [Op.or]: [
+      { email: identifier },
+      { email: `${identifier.toLowerCase()}@kunti.com` },
+      { email: `${identifier.toLowerCase()}@dropwinggroups.com` },
+      { phone: identifier },
+      { name: identifier }
+    ]
+  };
 
-  if (!user || user.role !== "ADMIN") {
+  let user = await User.findOne({ where: whereClause });
+
+  if (!user && (identifier.toLowerCase() === "admin" || identifier.toLowerCase() === "admin@kunti.com")) {
+    user = await User.findOne({ where: { role: "ADMIN" } });
+  }
+
+  if (!user) {
     return ApiResponse.error(res, "Invalid admin credentials", 401);
   }
 
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) {
+  const isMatch = await bcrypt.compare(rawPassword, user.password);
+  if (!isMatch) {
     return ApiResponse.error(res, "Invalid admin credentials", 401);
   }
 
   const token = jwt.sign(
     { id: user.id, role: "ADMIN" },
     JWT_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "30d" }
   );
 
   return ApiResponse.success(res, {
@@ -408,6 +411,7 @@ exports.adminLogin = asyncHandler(async (req, res) => {
     },
   }, "Admin login successful");
 });
+
 
 /**
  * UNIFIED SEND OTP (Customer / Seller / Admin)
@@ -429,7 +433,7 @@ exports.sendOTP = asyncHandler(async (req, res) => {
     }
   }
 
-  const otpCode = process.env.NODE_ENV !== "production" ? "123456" : generateOTP();
+  const otpCode = generateOTP();
 
   await OTP.destroy({ where: { phone } });
   await OTP.create({
@@ -439,13 +443,13 @@ exports.sendOTP = asyncHandler(async (req, res) => {
     expires_at: new Date(Date.now() + 10 * 60 * 1000),
   });
 
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`[AUTH] OTP for ${phone}: ${otpCode}`);
-  }
+  console.log(`[AUTH] 🔑 Customer/User Login OTP for ${phone}: ${otpCode}`);
 
-  const responseData = process.env.NODE_ENV !== "production" ? { otp: otpCode } : null;
-  return ApiResponse.success(res, responseData, "OTP sent successfully");
+  await sendSMS(phone, `Your Kunti verification OTP is ${otpCode}. Valid for 10 minutes.`);
+
+  return ApiResponse.success(res, null, "OTP sent successfully");
 });
+
 
 /**
  * UNIFIED VERIFY OTP
@@ -620,7 +624,7 @@ exports.sendRiderOTP = asyncHandler(async (req, res) => {
   const digitsOnly = phone.replace(/\D/g, "");
   const last10 = digitsOnly.slice(-10);
 
-  const otpCode = process.env.NODE_ENV !== "production" ? "123456" : generateOTP();
+  const otpCode = generateOTP();
 
   // Create OTP record for all phone representations so verification always succeeds
   const phonesToStore = [...new Set([user.phone, phone, digitsOnly, last10].filter(Boolean))];
@@ -634,13 +638,13 @@ exports.sendRiderOTP = asyncHandler(async (req, res) => {
     });
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`[AUTH] Rider OTP for ${user.phone} (${phone}): ${otpCode}`);
-  }
+  console.log(`[AUTH] 🔑 Rider Login OTP for ${user.phone} (${phone}): ${otpCode}`);
 
-  const responseData = process.env.NODE_ENV !== "production" ? { otp: otpCode } : null;
-  return ApiResponse.success(res, responseData, "OTP sent successfully");
+  await sendSMS(phone, `Your Kunti Rider login OTP is ${otpCode}. Valid for 10 minutes.`);
+
+  return ApiResponse.success(res, null, "OTP sent successfully");
 });
+
 
 /**
  * RIDER SPECIFIC VERIFY OTP
@@ -746,57 +750,4 @@ exports.updateFcmToken = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { fcm_token: fcmToken }, "FCM token updated successfully");
 });
 
-/**
- * ADMIN LOGIN
- * Allows admin with username "admin" and password "passadmin123" (or "admin123")
- */
-exports.adminLogin = asyncHandler(async (req, res) => {
-  const { username, email, password } = req.body;
-  const userIdentifier = (username || email || "").toString().trim().toLowerCase();
-  const rawPassword = (password || "").toString().trim();
-
-  if (!userIdentifier || !rawPassword) {
-    return ApiResponse.error(res, "Username and password required", 400);
-  }
-
-  // Strict check: username "admin" (or admin@kunti.com) and password "passadmin123" (or admin123)
-  const isAllowedUser = userIdentifier === "admin" || userIdentifier === "admin@kunti.com" || userIdentifier === "admin@kunti.in";
-  const isAllowedPassword = rawPassword === "passadmin123" || rawPassword === "admin123";
-
-  if (!isAllowedUser || !isAllowedPassword) {
-    return ApiResponse.error(res, "Invalid admin credentials. Only username 'admin' with valid password is allowed.", 401);
-  }
-
-  let adminUser = await User.findOne({
-    where: { role: "ADMIN" }
-  });
-
-  if (!adminUser) {
-    const hashedPassword = await bcrypt.hash("passadmin123", 10);
-    adminUser = await User.create({
-      name: "Restaurant Admin",
-      phone: "9999999999",
-      email: "admin@kunti.com",
-      password: hashedPassword,
-      role: "ADMIN"
-    });
-  }
-
-  const token = jwt.sign(
-    { id: adminUser.id, role: "ADMIN" },
-    JWT_SECRET,
-    { expiresIn: "30d" }
-  );
-
-  return ApiResponse.success(res, {
-    token,
-    role: "ADMIN",
-    user: {
-      id: adminUser.id,
-      name: adminUser.name || "Restaurant Admin",
-      phone: adminUser.phone || "9999999999",
-      role: "ADMIN"
-    }
-  }, "Admin login successful");
-});
 

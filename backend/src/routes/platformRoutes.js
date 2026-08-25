@@ -10,9 +10,11 @@ const ADMIN_ONLY = [verifyToken, allowRoles("ADMIN")];
 
 // ── Platform Settings ──────────────────────────────────────────────────────
 router.get("/settings/public", noCache, platformController.getPublicSettings);
+router.get("/public-settings", noCache, platformController.getPublicSettings);
 router.get("/settings", ...ADMIN_ONLY, platformController.getAllSettings);
 router.patch("/settings/:key", ...ADMIN_ONLY, platformController.updateSetting);
 router.post("/settings/bulk", ...ADMIN_ONLY, platformController.bulkUpdateSettings);
+
 
 // ── Seller Online/Offline Toggle ────────────────────────────────────────────
 

@@ -15,13 +15,20 @@ router.get(
 );
 
 // ── ADMIN — get ALL banners (active + inactive) ─────────────────
-// GET /api/banners/admin/all
+// GET /api/banners/admin/all or GET /api/banners/admin
 router.get(
   "/admin/all",
   verifyToken,
   allowRoles("ADMIN"),
   bannerController.getAllBannersAdmin
 );
+router.get(
+  "/admin",
+  verifyToken,
+  allowRoles("ADMIN"),
+  bannerController.getAllBannersAdmin
+);
+
 
 // ── ADMIN — add a new banner with image ───────────────────────
 // POST /api/banners/add or POST /api/banners

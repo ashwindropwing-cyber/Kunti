@@ -84,11 +84,10 @@ exports.updateProfile = asyncHandler(async (req, res) => {
         return ApiResponse.error(res, "Please wait before requesting another OTP", 429);
       }
       const otpCode = generateOTP();
-      if (process.env.NODE_ENV !== "production") {
-        console.log(`[PROFILE] Phone Update OTP for ${phone}: ${otpCode}`);
-      }
+      console.log(`[PROFILE] 🔑 Phone Update OTP for ${phone}: ${otpCode}`);
       await OTP.destroy({ where: { phone } });
       await OTP.create({
+
         phone,
         otp: otpCode,
         attempts: 0,

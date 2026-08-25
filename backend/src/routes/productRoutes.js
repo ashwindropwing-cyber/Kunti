@@ -51,6 +51,19 @@ router.patch(
   allowRoles("ADMIN"),
   productController.adminToggleProduct
 );
+router.patch(
+  "/:id/toggle",
+  verifyToken,
+  allowRoles("ADMIN"),
+  productController.adminToggleProduct
+);
+router.put(
+  "/:id/toggle",
+  verifyToken,
+  allowRoles("ADMIN"),
+  productController.adminToggleProduct
+);
+
 
 // Admin: Delete a product
 router.delete(

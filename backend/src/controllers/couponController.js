@@ -1,7 +1,9 @@
 const { Coupon, CouponUsage, Cart, CartItem, Product } = require("../models");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
+const cacheService = require("../services/cacheService");
 const { Op } = require("sequelize");
+
 
 /**
  * Helper: Calculate discount amount for a given coupon and subtotal
@@ -101,7 +103,11 @@ exports.createCoupon = asyncHandler(async (req, res) => {
     min_order_amount,
     minOrderValue,
     usage_limit_per_user,
+    max_usage_per_user,
+    maxUsage,
+    usageLimitPerUser,
     total_usage_limit,
+    totalUsageLimit,
     start_date,
     end_date,
   } = req.body;
@@ -119,6 +125,9 @@ exports.createCoupon = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, `Coupon code '${code}' already exists`, 400);
   }
 
+  const resolvedUsagePerUser = usage_limit_per_user ?? max_usage_per_user ?? maxUsage ?? usageLimitPerUser ?? 1;
+  const resolvedTotalUsage = total_usage_limit ?? totalUsageLimit ?? 1000;
+
   const coupon = await Coupon.create({
     code,
     description: description || null,
@@ -126,13 +135,14 @@ exports.createCoupon = asyncHandler(async (req, res) => {
     discount_value: parseFloat(actualDiscountVal),
     max_discount_amount: (max_discount_amount || maxDiscount) ? parseFloat(max_discount_amount || maxDiscount) : 0,
     min_order_amount: (min_order_amount || minOrderValue) ? parseFloat(min_order_amount || minOrderValue) : 0,
-    usage_limit_per_user: usage_limit_per_user ? parseInt(usage_limit_per_user) : 1,
-    total_usage_limit: total_usage_limit ? parseInt(total_usage_limit) : 1000,
+    usage_limit_per_user: parseInt(resolvedUsagePerUser),
+    total_usage_limit: parseInt(resolvedTotalUsage),
     start_date: start_date ? new Date(start_date) : null,
     end_date: end_date ? new Date(end_date) : null,
     is_active: true,
   });
 
+  await cacheService.delPattern("coupons*");
   return ApiResponse.success(res, coupon, "Coupon created successfully", 201);
 });
 
@@ -159,6 +169,8 @@ exports.updateCoupon = asyncHandler(async (req, res) => {
     "max_discount_amount",
     "min_order_amount",
     "usage_limit_per_user",
+    "max_usage_per_user",
+    "maxUsage",
     "total_usage_limit",
     "start_date",
     "end_date",
@@ -169,8 +181,10 @@ exports.updateCoupon = asyncHandler(async (req, res) => {
     if (req.body[field] !== undefined) {
       if (["discount_value", "max_discount_amount", "min_order_amount"].includes(field)) {
         coupon[field] = parseFloat(req.body[field]);
-      } else if (["usage_limit_per_user", "total_usage_limit"].includes(field)) {
-        coupon[field] = parseInt(req.body[field]);
+      } else if (["usage_limit_per_user", "max_usage_per_user", "maxUsage"].includes(field)) {
+        coupon.usage_limit_per_user = parseInt(req.body[field]);
+      } else if (field === "total_usage_limit") {
+        coupon.total_usage_limit = parseInt(req.body[field]);
       } else if (["start_date", "end_date"].includes(field)) {
         coupon[field] = req.body[field] ? new Date(req.body[field]) : null;
       } else {
@@ -180,6 +194,7 @@ exports.updateCoupon = asyncHandler(async (req, res) => {
   }
 
   await coupon.save();
+  await cacheService.delPattern("coupons*");
   return ApiResponse.success(res, coupon, "Coupon updated successfully");
 });
 
@@ -193,6 +208,7 @@ exports.toggleCoupon = asyncHandler(async (req, res) => {
 
   coupon.is_active = !coupon.is_active;
   await coupon.save();
+  await cacheService.delPattern("coupons*");
 
   return ApiResponse.success(
     res,
@@ -210,11 +226,21 @@ exports.deleteCoupon = asyncHandler(async (req, res) => {
   }
 
   await coupon.destroy();
+  await cacheService.delPattern("coupons*");
   return ApiResponse.success(res, { id }, "Coupon deleted successfully");
 });
 
+
 // ─── CUSTOMER: LIST AVAILABLE COUPONS ──────────────────────────────────────
 exports.getAvailableCoupons = asyncHandler(async (req, res) => {
+  const userId = req.user ? req.user.id : null;
+  const cacheKey = `coupons_available_${userId || 'anon'}`;
+  
+  const cached = await cacheService.get(cacheKey);
+  if (cached) {
+    return ApiResponse.success(res, cached);
+  }
+
   const now = new Date();
   const endOfDay = new Date(now);
   endOfDay.setHours(23, 59, 59, 999);
@@ -238,7 +264,7 @@ exports.getAvailableCoupons = asyncHandler(async (req, res) => {
       continue;
     }
 
-    if (c.usage_limit_per_user) {
+    if (userId && c.usage_limit_per_user) {
       const userUsages = await CouponUsage.count({
         where: { user_id: userId, coupon_id: c.id },
       });
@@ -259,8 +285,10 @@ exports.getAvailableCoupons = asyncHandler(async (req, res) => {
     });
   }
 
+  await cacheService.set(cacheKey, availableCoupons, 60);
   return ApiResponse.success(res, availableCoupons);
 });
+
 
 // ─── CUSTOMER: APPLY / PREVIEW COUPON ──────────────────────────────────────
 exports.applyCoupon = asyncHandler(async (req, res) => {

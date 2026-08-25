@@ -5,11 +5,18 @@ const { verifyToken, allowRoles } = require("../middlewares/authMiddleware");
 
 // Add address
 router.post(
+  "/",
+  verifyToken,
+  allowRoles("CUSTOMER"),
+  addressController.saveAddress
+);
+router.post(
   "/save",
   verifyToken,
   allowRoles("CUSTOMER"),
   addressController.saveAddress
 );
+
 
 // Get all addresses
 router.get(

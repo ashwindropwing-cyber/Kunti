@@ -258,17 +258,15 @@ exports.verifySellerOTP = asyncHandler(async (req, res) => {
     { expiresIn: "7d" }
   );
 
-  const sellerProfile = await Seller.findOne({
-    where: { user_id: user.id },
-  });
-
   return ApiResponse.success(res, {
     token,
     role: "SELLER",
-    seller: sellerProfile ? {
-      id: sellerProfile.id,
-      is_approved: sellerProfile.is_approved,
-    } : null,
+    user: {
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      role: user.role,
+    },
   }, "Seller login successful");
 });
 

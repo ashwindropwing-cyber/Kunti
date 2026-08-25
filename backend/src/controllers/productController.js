@@ -232,14 +232,15 @@ exports.adminToggleProduct = async (req, res) => {
     const product = await Product.findByPk(id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    product.is_active = !product.is_active;
+    product.is_available = !product.is_available;
     await product.save();
     await clearProductCaches(id);
 
     return res.json({
-      message: `Product ${product.is_active ? "listed" : "hidden"}`,
+      message: `Product ${product.is_available ? "listed" : "hidden"}`,
       product_id: product.id,
-      is_active: product.is_active,
+      is_available: product.is_available,
+      is_active: product.is_available,
     });
   } catch (error) {
     console.error("adminToggleProduct error:", error);

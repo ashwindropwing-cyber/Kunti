@@ -1,7 +1,8 @@
 const razorpay = require("../config/razorpay");
 const crypto = require("crypto");
-const { MasterOrder } = require("../models");
+const { MasterOrder, sequelize } = require("../models");
 const orderController = require("./orderController");
+const { restoreOrderInventoryAndCoupon } = require("./orderController");
 
 // ===============================
 // CREATE RAZORPAY ORDER
@@ -93,9 +94,14 @@ exports.verifyPayment = async (req, res) => {
     const sigBuffer = Buffer.from(generatedSignature, "hex");
     const receivedBuffer = Buffer.from(razorpay_signature || "", "hex");
     if (sigBuffer.length !== receivedBuffer.length || !crypto.timingSafeEqual(sigBuffer, receivedBuffer)) {
-      order.status = "CANCELLED";
-      order.payment_status = "FAILED";
-      await order.save();
+      await sequelize.transaction(async (t) => {
+        order.status = "CANCELLED";
+        order.payment_status = "FAILED";
+        order.cancelled_by = "PAYMENT_GATEWAY";
+        order.cancel_reason = "Invalid payment signature";
+        await order.save({ transaction: t });
+        await restoreOrderInventoryAndCoupon(order, t);
+      });
 
       return res.status(400).json({ message: "Payment verification failed - Invalid signature" });
     }

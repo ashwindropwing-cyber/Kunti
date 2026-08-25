@@ -16,6 +16,50 @@ function generateOrderNumber() {
   return `KUNTI-${randomNum}`;
 }
 
+// ─── HELPER: RESTORE INVENTORY & COUPON USAGE ON CANCELLATION ───────────────
+async function restoreOrderInventoryAndCoupon(order, transaction = null) {
+  if (!order) return;
+
+  // 1. Restore product inventory
+  const orderItems = await OrderItem.findAll({
+    where: { master_order_id: order.id },
+    transaction: transaction || undefined,
+  });
+
+  for (const item of orderItems) {
+    if (item.product_id && item.quantity) {
+      await Product.increment("stock_quantity", {
+        by: item.quantity,
+        where: { id: item.product_id },
+        transaction: transaction || undefined,
+      });
+    }
+  }
+
+  // 2. Restore Coupon Usage if a coupon was used
+  if (order.coupon_code) {
+    const coupon = await Coupon.findOne({
+      where: { code: order.coupon_code.toUpperCase().trim() },
+      transaction: transaction || undefined,
+    });
+    if (coupon) {
+      await CouponUsage.destroy({
+        where: { master_order_id: order.id, user_id: order.user_id },
+        transaction: transaction || undefined,
+      });
+      if (coupon.used_count > 0) {
+        await Coupon.decrement("used_count", {
+          by: 1,
+          where: { id: coupon.id },
+          transaction: transaction || undefined,
+        });
+      }
+    }
+    await cacheService.delPattern("coupons*");
+  }
+}
+exports.restoreOrderInventoryAndCoupon = restoreOrderInventoryAndCoupon;
+
 // ─── CREATE ORDER ─────────────────────────────────────────────────────────────
 exports.createOrder = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -334,7 +378,7 @@ exports.getOrderTracking = asyncHandler(async (req, res) => {
 // ─── UPDATE ORDER STATUS (ADMIN) ──────────────────────────────────────────────
 exports.updateOrderStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, cancel_reason } = req.body;
 
   const validStatuses = ["PLACED", "ACCEPTED", "ASSIGNED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"];
   if (!validStatuses.includes(status)) {
@@ -352,43 +396,21 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
   }
 
   const previousStatus = order.status;
-  order.status = status;
-  if (status === "DELIVERED" && order.payment_method === "COD") {
-    order.payment_status = "PAID";
-    order.is_paid = true;
-  }
-  await order.save();
-
   if (status === "CANCELLED" && previousStatus !== "CANCELLED") {
-    // Restore Stock
-    const orderItems = await OrderItem.findAll({
-      where: { master_order_id: order.id },
+    await sequelize.transaction(async (t) => {
+      order.status = "CANCELLED";
+      order.cancelled_by = "ADMIN";
+      order.cancel_reason = cancel_reason || "Cancelled by admin";
+      await order.save({ transaction: t });
+      await restoreOrderInventoryAndCoupon(order, t);
     });
-    for (const item of orderItems) {
-      await Product.increment("stock_quantity", {
-        by: item.quantity,
-        where: { id: item.product_id },
-      });
+  } else {
+    order.status = status;
+    if (status === "DELIVERED" && order.payment_method === "COD") {
+      order.payment_status = "PAID";
+      order.is_paid = true;
     }
-
-    // Restore Coupon Usage if a coupon was used
-    if (order.coupon_code) {
-      const coupon = await Coupon.findOne({
-        where: { code: order.coupon_code.toUpperCase().trim() },
-      });
-      if (coupon) {
-        await CouponUsage.destroy({
-          where: { master_order_id: order.id, user_id: order.user_id },
-        });
-        if (coupon.used_count > 0) {
-          await Coupon.decrement("used_count", {
-            by: 1,
-            where: { id: coupon.id },
-          });
-        }
-      }
-      await cacheService.delPattern("coupons*");
-    }
+    await order.save();
   }
 
   if (status === "DELIVERED") {
@@ -508,7 +530,7 @@ exports.bulkAssignRider = asyncHandler(async (req, res) => {
 
 // ─── BULK UPDATE RIDER ORDERS STATUS (RIDER / ADMIN) ──────────────────────────
 exports.bulkUpdateRiderOrders = asyncHandler(async (req, res) => {
-  const { order_ids, status } = req.body;
+  const { order_ids, status, cancel_reason } = req.body;
 
   if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
     return ApiResponse.error(res, "order_ids array is required", 400);
@@ -521,22 +543,31 @@ exports.bulkUpdateRiderOrders = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, `Invalid status. Allowed for bulk rider update: ${validStatuses.join(", ")}`, 400);
   }
 
-  // Build update fields — for DELIVERED, also mark COD orders as paid in one pass
-  const updateFields = { status };
-  if (status === "DELIVERED") {
-    // We do two targeted updates: one for COD (mark paid), one for all
-    // First update: COD-specific — set payment_status and is_paid
+  if (status === "CANCELLED") {
+    const ordersToCancel = await MasterOrder.findAll({
+      where: { id: { [Op.in]: order_ids }, status: { [Op.ne]: "CANCELLED" } }
+    });
+    for (const ord of ordersToCancel) {
+      await sequelize.transaction(async (t) => {
+        ord.status = "CANCELLED";
+        ord.cancelled_by = req.user.role || "RIDER";
+        ord.cancel_reason = cancel_reason || "Cancelled in bulk";
+        await ord.save({ transaction: t });
+        await restoreOrderInventoryAndCoupon(ord, t);
+      });
+    }
+  } else if (status === "DELIVERED") {
+    // We do two targeted updates: one for COD (mark paid), one for non-COD
     await MasterOrder.update(
       { status: "DELIVERED", payment_status: "PAID", is_paid: true },
       { where: { id: { [Op.in]: order_ids }, payment_method: "COD" } }
     );
-    // Second update: non-COD orders — just status (no payment change needed)
     await MasterOrder.update(
       { status: "DELIVERED" },
       { where: { id: { [Op.in]: order_ids }, payment_method: { [Op.ne]: "COD" } } }
     );
   } else {
-    await MasterOrder.update(updateFields, {
+    await MasterOrder.update({ status }, {
       where: { id: { [Op.in]: order_ids } }
     });
   }
@@ -630,68 +661,38 @@ exports.getAllOrders = asyncHandler(async (req, res) => {
 // ─── CANCEL ORDER ─────────────────────────────────────────────────────────────
 exports.cancelOrder = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const order = await MasterOrder.findByPk(id);
+  const { cancel_reason } = req.body || {};
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  const order = await MasterOrder.findByPk(id, {
+    include: [{ model: OrderItem, as: "items" }],
+  });
 
   if (!order) return ApiResponse.error(res, "Order not found", 404);
 
-  if (req.user.role === "CUSTOMER" && order.user_id !== req.user.id) {
-    return ApiResponse.error(res, "Access denied", 403);
+  if (userRole === "CUSTOMER" && order.user_id !== userId) {
+    return ApiResponse.error(res, "Access denied: this order does not belong to you", 403);
   }
 
   if (["DELIVERED", "CANCELLED"].includes(order.status)) {
-    return ApiResponse.error(res, `Cannot cancel order in ${order.status} state`, 400);
+    return ApiResponse.error(res, `Cannot cancel an order that is already ${order.status}`, 400);
   }
 
-  // Customers can only cancel at PLACED or ACCEPTED — once PREPARING starts, kitchen is working.
-  // New flow: PLACED → ACCEPTED → PREPARING → ASSIGNED → OUT_FOR_DELIVERY → DELIVERED
-  if (req.user.role === "CUSTOMER" && ["PREPARING", "ASSIGNED", "OUT_FOR_DELIVERY"].includes(order.status)) {
+  // Customers can only cancel at PLACED, ACCEPTED, or PENDING — once PREPARING starts, kitchen is working.
+  if (userRole === "CUSTOMER" && ["PREPARING", "ASSIGNED", "OUT_FOR_DELIVERY"].includes(order.status)) {
     return ApiResponse.error(res, "Order cannot be cancelled once the kitchen has started preparing", 400);
   }
 
   await sequelize.transaction(async (t) => {
     order.status = "CANCELLED";
+    order.cancel_reason = cancel_reason || "Cancelled by user";
+    order.cancelled_by = userRole;
     await order.save({ transaction: t });
-
-    // Restore Stock — fetch items INSIDE the transaction to prevent race condition
-    const orderItems = await OrderItem.findAll({
-      where: { master_order_id: order.id },
-      transaction: t,
-    });
-    for (const item of orderItems) {
-      await Product.increment("stock_quantity", {
-        by: item.quantity,
-        where: { id: item.product_id },
-        transaction: t,
-      });
-    }
-
-    // Restore Coupon Usage if a coupon was used on this order
-    if (order.coupon_code) {
-      const coupon = await Coupon.findOne({
-        where: { code: order.coupon_code.toUpperCase().trim() },
-        transaction: t,
-      });
-      if (coupon) {
-        await CouponUsage.destroy({
-          where: { master_order_id: order.id, user_id: order.user_id },
-          transaction: t,
-        });
-        if (coupon.used_count > 0) {
-          await Coupon.decrement("used_count", {
-            by: 1,
-            where: { id: coupon.id },
-            transaction: t,
-          });
-        }
-      }
-    }
+    await restoreOrderInventoryAndCoupon(order, t);
   });
 
-  if (order.coupon_code) {
-    await cacheService.delPattern("coupons*");
-  }
-
-  return ApiResponse.success(res, order, "Order cancelled successfully");
+  return ApiResponse.success(res, order.toJSON ? order.toJSON() : order, "Order cancelled successfully");
 });
 
 
@@ -794,73 +795,6 @@ exports.verifyDeliveryOTP = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, order, "Delivery OTP verified and order marked as DELIVERED successfully!");
 });
-
-// ─── CANCEL ORDER (CUSTOMER / ADMIN) ─────────────────────────────────────────
-exports.cancelOrder = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { cancel_reason } = req.body;
-  const userId = req.user.id;
-  const userRole = req.user.role;
-
-  const order = await MasterOrder.findByPk(id, {
-    include: [{ model: OrderItem, as: "items" }],
-  });
-
-  if (!order) {
-    return ApiResponse.error(res, "Order not found", 404);
-  }
-
-  if (userRole === "CUSTOMER" && order.user_id !== userId) {
-    return ApiResponse.error(res, "Access denied: this order does not belong to you", 403);
-  }
-
-  if (["DELIVERED", "CANCELLED"].includes(order.status)) {
-    return ApiResponse.error(res, `Cannot cancel an order that is already ${order.status}`, 400);
-  }
-
-  if (userRole === "CUSTOMER" && !["PLACED", "ACCEPTED", "PENDING"].includes(order.status)) {
-    return ApiResponse.error(res, `Order is already ${order.status} and cannot be cancelled by customer`, 400);
-  }
-
-  // Restore inventory stock
-  if (order.items && order.items.length > 0) {
-    for (const item of order.items) {
-      if (item.product_id && item.quantity) {
-        await Product.increment("stock_quantity", {
-          by: item.quantity,
-          where: { id: item.product_id },
-        }).catch(err => console.warn("Stock restore warn:", err.message));
-      }
-    }
-  }
-
-  // Restore Coupon Usage if a coupon was used
-  if (order.coupon_code) {
-    const coupon = await Coupon.findOne({
-      where: { code: order.coupon_code.toUpperCase().trim() },
-    });
-    if (coupon) {
-      await CouponUsage.destroy({
-        where: { master_order_id: order.id, user_id: order.user_id },
-      });
-      if (coupon.used_count > 0) {
-        await Coupon.decrement("used_count", {
-          by: 1,
-          where: { id: coupon.id },
-        });
-      }
-    }
-    await cacheService.delPattern("coupons*");
-  }
-
-  order.status = "CANCELLED";
-  order.cancel_reason = cancel_reason || "Cancelled by user";
-  order.cancelled_by = userRole;
-  await order.save();
-
-  return ApiResponse.success(res, order.toJSON(), "Order cancelled successfully");
-});
-
 
 // ─── SUBMIT ORDER REVIEW (CUSTOMER) ──────────────────────────────────────────
 exports.submitOrderReview = asyncHandler(async (req, res) => {

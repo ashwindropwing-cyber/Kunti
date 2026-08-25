@@ -251,8 +251,10 @@ exports.getAvailableCoupons = asyncHandler(async (req, res) => {
   const coupons = await Coupon.findAll({
     where: {
       is_active: true,
-      [Op.or]: [{ start_date: null }, { start_date: { [Op.lte]: endOfDay } }],
-      [Op.or]: [{ end_date: null }, { end_date: { [Op.gte]: startOfDay } }],
+      [Op.and]: [
+        { [Op.or]: [{ start_date: null }, { start_date: { [Op.lte]: endOfDay } }] },
+        { [Op.or]: [{ end_date: null }, { end_date: { [Op.gte]: startOfDay } }] },
+      ],
     },
     order: [["min_order_amount", "ASC"]],
   });

@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const { Op } = require("sequelize");
-const { MasterOrder, OrderItem, Product, sequelize } = require("../models");
+const { MasterOrder, sequelize } = require("../models");
+const { restoreOrderInventoryAndCoupon } = require("../controllers/orderController");
 
 const PAYMENT_TIMEOUT_MIN = 15;
 
@@ -25,17 +26,10 @@ cron.schedule("*/10 * * * *", async () => {
         await sequelize.transaction(async (t) => {
           order.status = "CANCELLED";
           order.payment_status = "FAILED";
+          order.cancelled_by = "SYSTEM";
+          order.cancel_reason = "Payment timeout (unpaid online order)";
           await order.save({ transaction: t });
-
-          // Restore product stock
-          const orderItems = await OrderItem.findAll({ where: { master_order_id: order.id } });
-          for (const item of orderItems) {
-            await Product.increment("stock_quantity", {
-              by: item.quantity,
-              where: { id: item.product_id },
-              transaction: t,
-            });
-          }
+          await restoreOrderInventoryAndCoupon(order, t);
         });
       } catch (error) {
         console.error(`Auto-cancel error for order ${order.id}:`, error.message);

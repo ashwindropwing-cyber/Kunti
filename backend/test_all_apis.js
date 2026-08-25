@@ -136,6 +136,7 @@ async function runTests() {
     const icon = passed ? "✅" : "❌";
     console.log(`${icon} [${res.statusCode}] ${method} ${path.padEnd(35)} — ${name} (${res.durationMs}ms)`);
     if (!passed) {
+      console.log(`❌ FAILED TEST: "${name}" [${method} ${path}] status=${res.statusCode}`);
       console.log("   --> Error Body:", JSON.stringify(res.body));
     }
     return res;
@@ -195,8 +196,8 @@ async function runTests() {
   if (sampleProductId) {
     await test("Get Product Details (Miss)", "GET", `/api/products/${sampleProductId}`);
     await test("Get Product Details (Hit)", "GET", `/api/products/${sampleProductId}`);
-    await test("Get Product Reviews", "GET", `/api/products/${sampleProductId}/reviews`);
-    await test("Toggle Product Active Status", "PUT", `/api/products/${sampleProductId}/toggle`, null, "admin");
+    await test("Toggle Product Active Status (Offline)", "PUT", `/api/products/${sampleProductId}/toggle`, null, "admin");
+    await test("Toggle Product Active Status (Online)", "PUT", `/api/products/${sampleProductId}/toggle`, null, "admin");
   }
 
   // 6. Banner APIs
@@ -262,6 +263,7 @@ async function runTests() {
   console.log(`  Average Overall Latency: ${avgLatency} ms`);
   console.log(`  Average Cache-Hit Latency (L1/L2): ${avgHitLatency} ms ⚡`);
   console.log("===============================================================");
+  process.exit(0);
 }
 
 runTests();

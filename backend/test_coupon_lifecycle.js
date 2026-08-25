@@ -243,6 +243,7 @@ async function runCouponLifecycleTest() {
   console.log("\n===============================================================");
   console.log("  🎉 ALL COUPON LIFECYCLE TESTS PASSED WITH 100% ACCURACY!    ");
   console.log("===============================================================\n");
+  process.exit(0);
 }
 
 runCouponLifecycleTest();

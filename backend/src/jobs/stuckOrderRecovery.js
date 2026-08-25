@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const { Op } = require("sequelize");
-const { MasterOrder, OrderItem, Product, sequelize } = require("../models");
+const { MasterOrder, sequelize } = require("../models");
+const { restoreOrderInventoryAndCoupon } = require("../controllers/orderController");
 
 const AUTO_CANCEL_THRESHOLD_MIN = 60; // Auto-cancel unaccepted orders after 60 min
 
@@ -20,17 +21,10 @@ cron.schedule("*/15 * * * *", async () => {
         console.log(`🔧 [StuckOrderRecovery] Auto-cancelling unaccepted order ${order.order_number}`);
         await sequelize.transaction(async (t) => {
           order.status = "CANCELLED";
+          order.cancelled_by = "SYSTEM";
+          order.cancel_reason = "Order unaccepted past threshold (auto-recovery)";
           await order.save({ transaction: t });
-
-          // Restore product stock
-          const orderItems = await OrderItem.findAll({ where: { master_order_id: order.id } });
-          for (const item of orderItems) {
-            await Product.increment("stock_quantity", {
-              by: item.quantity,
-              where: { id: item.product_id },
-              transaction: t,
-            });
-          }
+          await restoreOrderInventoryAndCoupon(order, t);
         });
       } catch (err) {
         console.error(`🔧 [StuckOrderRecovery] Error cancelling order ${order.id}:`, err.message);

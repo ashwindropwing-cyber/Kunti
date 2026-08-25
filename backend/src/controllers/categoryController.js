@@ -22,7 +22,7 @@ exports.addCategory = async (req, res) => {
       description: description ? description.trim() : null,
       display_order: display_order !== undefined ? parseInt(display_order) : 0,
       is_active: is_active !== undefined ? (is_active === true || is_active === "true") : true,
-      image_url: (imagePath && typeof imagePath === "string" && imagePath.trim().isNotEmpty) ? imagePath.trim() : (imagePath || null)
+      image_url: (imagePath && typeof imagePath === "string" && imagePath.trim().length > 0) ? imagePath.trim() : (imagePath || null)
     });
 
     // clear cache when category changes
@@ -120,7 +120,7 @@ exports.updateCategory = async (req, res) => {
     } else {
       const explicitImg = image_url !== undefined ? image_url : (imageUrl !== undefined ? imageUrl : (image !== undefined ? image : (banner !== undefined ? banner : banner_url)));
       if (explicitImg !== undefined) {
-        category.image_url = (explicitImg && typeof explicitImg === "string" && explicitImg.trim().isNotEmpty) ? explicitImg.trim() : (explicitImg || null);
+        category.image_url = (explicitImg && typeof explicitImg === "string" && explicitImg.trim().length > 0) ? explicitImg.trim() : (explicitImg || null);
       }
     }
 

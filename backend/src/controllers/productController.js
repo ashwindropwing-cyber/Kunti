@@ -10,7 +10,7 @@ const asyncHandler = require("../utils/AsyncHandler");
 const { Op } = require("sequelize");
 
 async function clearProductCaches(productId) {
-  const keysToDelete = ["all_products"];
+  const keysToDelete = ["all_products", "categories", "categories_all"];
   if (productId) keysToDelete.push(`product_${productId}`);
 
   for await (const scanned of redisClient.scanIterator({ MATCH: "nearby_*" })) {

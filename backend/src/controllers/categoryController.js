@@ -1,4 +1,5 @@
 const Category = require("../models/category");
+const Product = require("../models/product");
 const redisClient = require("../config/redis");
 const { optimizeCloudinaryUrl, CLOUDINARY_TRANSFORMATIONS } = require("../utils/cloudinaryUtils");
 
@@ -57,9 +58,18 @@ exports.getCategories = async (req, res) => {
 
     const whereCondition = showAll ? {} : { is_active: true };
 
-    // fetch from database
+    // fetch from database with active product count
     const categories = await Category.findAll({
       where: whereCondition,
+      include: [
+        {
+          model: Product,
+          as: "products",
+          attributes: ["id"],
+          where: { is_active: true },
+          required: false,
+        },
+      ],
       order: [["display_order", "ASC"], ["createdAt", "DESC"]],
     });
 
@@ -69,6 +79,8 @@ exports.getCategories = async (req, res) => {
         data.image_url = optimizeCloudinaryUrl(data.image_url, CLOUDINARY_TRANSFORMATIONS.CATEGORY);
       }
       data.banner_image = data.image_url; // Backward compatibility alias
+      data.product_count = Array.isArray(data.products) ? data.products.length : 0;
+      delete data.products;
       return data;
     });
 

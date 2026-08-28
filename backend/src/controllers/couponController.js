@@ -225,6 +225,9 @@ exports.deleteCoupon = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Coupon not found", 404);
   }
 
+  // Clean up associated usage records
+  await CouponUsage.destroy({ where: { coupon_id: id } }).catch((e) => console.warn("CouponUsage cleanup error:", e.message));
+
   await coupon.destroy();
   await cacheService.delPattern("coupons*");
   return ApiResponse.success(res, { id }, "Coupon deleted successfully");

@@ -52,6 +52,12 @@ router.delete(
   allowRoles("ADMIN"),
   couponController.deleteCoupon
 );
+router.delete(
+  "/:id",
+  verifyToken,
+  allowRoles("ADMIN"),
+  couponController.deleteCoupon
+);
 
 // ─── CUSTOMER ROUTES ────────────────────────────────────────────────────────
 router.get(

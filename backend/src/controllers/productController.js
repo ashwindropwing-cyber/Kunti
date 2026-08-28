@@ -2,6 +2,9 @@ const Product = require("../models/product");
 const Category = require("../models/category");
 const Review = require("../models/review");
 const User = require("../models/user");
+const CartItem = require("../models/cartItem");
+const Wishlist = require("../models/wishlist");
+const OrderItem = require("../models/orderItem");
 const { optimizeCloudinaryUrl, CLOUDINARY_TRANSFORMATIONS } = require("../utils/cloudinaryUtils");
 const redisClient = require("../config/redis");
 const ApiResponse = require("../utils/ApiResponse");
@@ -10,16 +13,20 @@ const asyncHandler = require("../utils/AsyncHandler");
 const { Op } = require("sequelize");
 
 async function clearProductCaches(productId) {
-  const keysToDelete = ["all_products", "categories", "categories_all"];
+  const keysToDelete = ["all_products", "categories", "categories_all", "active_banners"];
   if (productId) keysToDelete.push(`product_${productId}`);
 
-  for await (const scanned of redisClient.scanIterator({ MATCH: "nearby_*" })) {
-    const keys = Array.isArray(scanned) ? scanned : [scanned];
-    for (const key of keys) {
-      if (typeof key === "string" && key.length > 0) {
-        keysToDelete.push(key);
+  try {
+    for await (const scanned of redisClient.scanIterator({ MATCH: "nearby_*" })) {
+      const keys = Array.isArray(scanned) ? scanned : [scanned];
+      for (const key of keys) {
+        if (typeof key === "string" && key.length > 0) {
+          keysToDelete.push(key);
+        }
       }
     }
+  } catch (err) {
+    console.warn("Redis scan error:", err.message);
   }
 
   for (const key of keysToDelete) {
@@ -252,15 +259,21 @@ exports.adminDeleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const product = await Product.findByPk(id);
-    if (!product) return res.status(404).json({ message: "Product not found" });
+    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+
+    // Clean up dependent records
+    await CartItem.destroy({ where: { product_id: id } }).catch((e) => console.warn("CartItem cleanup error:", e.message));
+    await Wishlist.destroy({ where: { product_id: id } }).catch((e) => console.warn("Wishlist cleanup error:", e.message));
+    await Review.destroy({ where: { product_id: id } }).catch((e) => console.warn("Review cleanup error:", e.message));
+    await OrderItem.update({ product_id: null }, { where: { product_id: id } }).catch((e) => console.warn("OrderItem unlink error:", e.message));
 
     await product.destroy();
     await clearProductCaches(id);
 
-    return res.json({ message: "Product deleted", product_id: id });
+    return res.json({ success: true, message: "Product deleted", product_id: id });
   } catch (error) {
     console.error("adminDeleteProduct error:", error);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 };
 

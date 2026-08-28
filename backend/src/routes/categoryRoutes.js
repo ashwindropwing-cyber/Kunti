@@ -35,6 +35,12 @@ router.delete(
   allowRoles("ADMIN"),
   categoryController.deleteCategory
 );
+router.delete(
+  "/admin/:id",
+  verifyToken,
+  allowRoles("ADMIN"),
+  categoryController.deleteCategory
+);
 router.get(
   "/",
   categoryController.getCategories

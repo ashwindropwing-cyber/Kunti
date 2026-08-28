@@ -85,6 +85,12 @@ router.delete(
   allowRoles("ADMIN"),
   adminController.deleteRiderByAdmin
 );
+router.delete(
+  "/riders/:id",
+  verifyToken,
+  allowRoles("ADMIN"),
+  adminController.deleteRiderByAdmin
+);
 
 // Rider Profile Update Approval/Rejection
 router.patch(

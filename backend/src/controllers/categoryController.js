@@ -163,19 +163,23 @@ exports.deleteCategory = async (req, res) => {
     const category = await Category.findByPk(id);
 
     if (!category) {
-      return res.status(404).json({ message: "Category not found" });
+      return res.status(404).json({ success: false, message: "Category not found" });
     }
+
+    // Unlink products associated with this category
+    await Product.update({ category_id: null }, { where: { category_id: id } }).catch((e) => console.warn("Product category unlink error:", e.message));
 
     await category.destroy();
     try {
       await redisClient.del("categories");
       await redisClient.del("categories_all");
+      await redisClient.del("all_products");
     } catch (_) {}
 
-    return res.json({ message: "Category deleted successfully" });
+    return res.json({ success: true, message: "Category deleted successfully", category_id: id });
   } catch (error) {
     console.error("Delete category error:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 };
 

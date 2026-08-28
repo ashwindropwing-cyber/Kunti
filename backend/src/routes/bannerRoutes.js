@@ -77,5 +77,11 @@ router.delete(
   allowRoles("ADMIN"),
   bannerController.deleteBanner
 );
+router.delete(
+  "/admin/:id",
+  verifyToken,
+  allowRoles("ADMIN"),
+  bannerController.deleteBanner
+);
 
 module.exports = router;

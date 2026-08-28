@@ -72,6 +72,12 @@ router.delete(
   allowRoles("ADMIN"),
   productController.adminDeleteProduct
 );
+router.delete(
+  "/:id",
+  verifyToken,
+  allowRoles("ADMIN"),
+  productController.adminDeleteProduct
+);
 
 // CUSTOMER → Nearby products (Simplified for single-vendor)
 router.get(

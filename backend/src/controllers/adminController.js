@@ -4,6 +4,11 @@ const Rider = require("../models/rider");
 const MasterOrder = require("../models/masterOrder");
 const Product = require("../models/product");
 const Review = require("../models/review");
+const Cart = require("../models/cart");
+const CartItem = require("../models/cartItem");
+const Wishlist = require("../models/wishlist");
+const CustomerAddress = require("../models/customerAddress");
+const CouponUsage = require("../models/couponUsage");
 
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
@@ -487,10 +492,18 @@ exports.deleteRiderByAdmin = asyncHandler(async (req, res) => {
     return ApiResponse.error(res, "Rider not found", 404);
   }
 
-  await User.destroy({ where: { id: rider.user_id } });
+  // Unlink assigned orders so historical orders remain intact
+  await MasterOrder.update({ rider_id: null }, { where: { rider_id: id } }).catch((e) => console.warn("MasterOrder rider unlink error:", e.message));
+  // Clean up reviews associated with rider
+  await Review.destroy({ where: { rider_id: id } }).catch((e) => console.warn("Review rider cleanup error:", e.message));
+
+  const userId = rider.user_id;
   await Rider.destroy({ where: { id } });
+  if (userId) {
+    await User.destroy({ where: { id: userId } }).catch((e) => console.warn("User cleanup error:", e.message));
+  }
   
-  return ApiResponse.success(res, null, "Rider and associated user account deleted");
+  return ApiResponse.success(res, { id }, "Rider and associated user account deleted");
 });
 
 // ======================================
@@ -549,11 +562,22 @@ exports.deleteUserByAdmin = asyncHandler(async (req, res) => {
   const user = await User.findByPk(id);
   if (!user) return ApiResponse.error(res, "User not found", 404);
 
-  // If user is a seller or rider, handle associated documents if necessary
-  // For now, just delete the user
+  // Clean up user dependent data
+  const userCarts = await Cart.findAll({ where: { user_id: id } }).catch(() => []);
+  for (const c of userCarts) {
+    await CartItem.destroy({ where: { cart_id: c.id } }).catch(() => {});
+  }
+  await Cart.destroy({ where: { user_id: id } }).catch(() => {});
+  await Wishlist.destroy({ where: { user_id: id } }).catch(() => {});
+  await CustomerAddress.destroy({ where: { user_id: id } }).catch(() => {});
+  await Review.destroy({ where: { user_id: id } }).catch(() => {});
+  await CouponUsage.destroy({ where: { user_id: id } }).catch(() => {});
+  await Rider.destroy({ where: { user_id: id } }).catch(() => {});
+  await MasterOrder.update({ user_id: null }, { where: { user_id: id } }).catch(() => {});
+
   await user.destroy();
 
-  return ApiResponse.success(res, null, "User deleted successfully");
+  return ApiResponse.success(res, { id }, "User deleted successfully");
 });
 
 exports.confirmOrderPayment = asyncHandler(async (req, res) => {

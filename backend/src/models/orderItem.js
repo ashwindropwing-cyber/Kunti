@@ -15,7 +15,7 @@ const OrderItem = sequelize.define(
     },
     product_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
     },
     product_name: {
       type: DataTypes.STRING,

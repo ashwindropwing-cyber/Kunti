@@ -61,7 +61,6 @@ router.get(
   verifyToken,
   allowRoles("ADMIN"),
   heavyReadLimiter,
-  cacheFor(30),
   adminController.getAllRiders
 );
 

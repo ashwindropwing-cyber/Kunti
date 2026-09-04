@@ -14,6 +14,7 @@ const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/AsyncHandler");
 const { sendEmail } = require("../utils/sendEmail");
 const { chunkedFindAll } = require("../utils/dbHelper");
+const { invalidateCache } = require("../middlewares/responseCache");
 
 exports.getDashboardMetrics = asyncHandler(async (req, res) => {
   const today = new Date();
@@ -229,6 +230,9 @@ exports.createRiderByAdmin = asyncHandler(async (req, res) => {
     });
   }
 
+  invalidateCache("/admin");
+  invalidateCache("/riders");
+
   return ApiResponse.success(res, {
     rider_id: rider.id,
     user_id: user.id,
@@ -343,6 +347,9 @@ exports.updateRiderByAdmin = asyncHandler(async (req, res) => {
   await user.save();
   await rider.save();
 
+  invalidateCache("/admin");
+  invalidateCache("/riders");
+
   return ApiResponse.success(res, { ...rider, User: user }, "Rider updated successfully");
 });
 
@@ -374,6 +381,9 @@ exports.verifyRider = asyncHandler(async (req, res) => {
   });
 
   await rider.save();
+
+  invalidateCache("/admin");
+  invalidateCache("/riders");
 
   // Send FCM Notification
   if (rider.fcm_token) {
@@ -503,6 +513,9 @@ exports.deleteRiderByAdmin = asyncHandler(async (req, res) => {
     await User.destroy({ where: { id: userId } }).catch((e) => console.warn("User cleanup error:", e.message));
   }
   
+  invalidateCache("/admin");
+  invalidateCache("/riders");
+
   return ApiResponse.success(res, { id }, "Rider and associated user account deleted");
 });
 

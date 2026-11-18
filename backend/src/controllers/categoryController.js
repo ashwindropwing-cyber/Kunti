@@ -66,7 +66,7 @@ exports.getCategories = async (req, res) => {
           model: Product,
           as: "products",
           attributes: ["id"],
-          where: { is_active: true },
+          where: { is_available: true },
           required: false,
         },
       ],
